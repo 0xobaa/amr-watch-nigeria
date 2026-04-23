@@ -460,12 +460,17 @@ with tab1:
                 "selection. Use this as a quick 'what to watch' list.")
 
     # Rank all organism × antibiotic pairs by %R, requiring a minimum volume so tiny
-    # denominators don't dominate the top of the list.
-    MIN_TESTS = 30
+    # denominators don't dominate the top of the list. The threshold scales with the
+    # filtered selection size so tight filters (single facility + specimen type) still
+    # produce results rather than always hitting the "not enough volume" message.
+    MIN_TESTS = max(10, min(30, len(iso_f) // 50))
     concerns = (ast_f.groupby(["organism", "antibiotic", "antibiotic_class"])
                  .agg(n_tested=("interpretation", "count"),
                       n_r=("interpretation", lambda x: (x == "R").sum()))
                  .reset_index())
+    # Cast to plain int to avoid PyArrow-backed dtype division errors on newer pandas
+    concerns["n_tested"] = concerns["n_tested"].astype(int)
+    concerns["n_r"] = concerns["n_r"].astype(int)
     concerns["pct_r"] = (concerns["n_r"] / concerns["n_tested"] * 100).round(1)
 
     # Exclude combinations with well-known intrinsic / near-universal resistance that
@@ -544,25 +549,31 @@ with tab3:
                     .agg(n_tested=("interpretation", "count"),
                          n_r=("interpretation", lambda x: (x == "R").sum()))
                     .reset_index())
+        summary["n_tested"] = summary["n_tested"].astype(int)
+        summary["n_r"] = summary["n_r"].astype(int)
         summary["pct_r"] = (summary["n_r"] / summary["n_tested"] * 100).round(1)
         summary = summary[summary["n_tested"] >= 10].sort_values("pct_r")
 
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            fig = px.bar(summary, x="pct_r", y="antibiotic", orientation="h",
-                          text="pct_r", color="pct_r",
-                          color_continuous_scale="RdYlGn_r", range_color=[0, 100],
-                          hover_data=["antibiotic_class", "n_tested"])
-            fig.update_traces(texttemplate="%{text}%", textposition="outside")
-            fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
-                               height=max(400, 40 * len(summary)),
-                               xaxis_range=[0, 110], coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            st.markdown(f"**{sel}** — {oa['isolate_id'].nunique():,} isolates")
-            disp = summary[["antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
-            disp.columns = ["Antibiotic", "Class", "% Resistant", "Isolates tested"]
-            st.dataframe(disp, hide_index=True, use_container_width=True)
+        if len(summary) == 0:
+            st.info("Not enough tests per antibiotic to display an antibiogram for this "
+                    "organism under the current filter. Try broadening the selection.")
+        else:
+            c1, c2 = st.columns([2, 1])
+            with c1:
+                fig = px.bar(summary, x="pct_r", y="antibiotic", orientation="h",
+                              text="pct_r", color="pct_r",
+                              color_continuous_scale="RdYlGn_r", range_color=[0, 100],
+                              hover_data=["antibiotic_class", "n_tested"])
+                fig.update_traces(texttemplate="%{text}%", textposition="outside")
+                fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
+                                   height=max(400, 40 * len(summary)),
+                                   xaxis_range=[0, 110], coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True)
+            with c2:
+                st.markdown(f"**{sel}** — {oa['isolate_id'].nunique():,} isolates")
+                disp = summary[["antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
+                disp.columns = ["Antibiotic", "Class", "% Resistant", "Isolates tested"]
+                st.dataframe(disp, hide_index=True, use_container_width=True)
 
     st.markdown("---")
     st.subheader("Resistance by antibiotic class (across all organisms in selection)")
@@ -570,6 +581,8 @@ with tab3:
             .agg(n_tested=("interpretation", "count"),
                  n_r=("interpretation", lambda x: (x == "R").sum()))
             .reset_index())
+    cs["n_tested"] = cs["n_tested"].astype(int)
+    cs["n_r"] = cs["n_r"].astype(int)
     cs["pct_r"] = (cs["n_r"] / cs["n_tested"] * 100).round(1)
     cs = cs.sort_values("pct_r")
     fig = px.bar(cs, x="pct_r", y="antibiotic_class", orientation="h", text="pct_r",
@@ -647,6 +660,8 @@ with tab4:
                               .agg(n_tested=("interpretation", "count"),
                                    n_r=("interpretation", lambda x: (x == "R").sum()))
                               .reset_index())
+            trend_summary["n_tested"] = trend_summary["n_tested"].astype(int)
+            trend_summary["n_r"] = trend_summary["n_r"].astype(int)
             trend_summary["pct_r"] = (trend_summary["n_r"] / trend_summary["n_tested"] * 100).round(1)
 
             # Sort period chronologically
@@ -758,6 +773,8 @@ with tab5:
                         .agg(n=("interpretation", "count"),
                              n_r=("interpretation", lambda x: (x == "R").sum()))
                         .reset_index())
+            age_sum["n"] = age_sum["n"].astype(int)
+            age_sum["n_r"] = age_sum["n_r"].astype(int)
             age_sum["pct_r"] = (age_sum["n_r"] / age_sum["n"] * 100).round(1)
             age_sum["patient_age_group"] = pd.Categorical(
                 age_sum["patient_age_group"], categories=age_order, ordered=True
@@ -867,7 +884,7 @@ with tab7:
     st.info(
         "**Data access**  \n"
         "Data access for research, policy, or institutional use is available on request. "
-        "Contact: abimbola@abimbolaoba.com"
+        "Contact: hello@abimbolaoba.com"
     )
 
 st.markdown("---")
