@@ -235,7 +235,7 @@ def generate_amr_dataset(n_isolates: int = 4500, seed: int = 42):
         spec = str(rng.choice(list(SPECIMENS.keys()), p=list(SPECIMENS.values())))
         ward = str(rng.choice(list(WARDS.keys()), p=list(WARDS.values())))
 
-        cdate = start + timedelta(days=int(rng.integers(0, 730)))
+        cdate = start + timedelta(days=int(rng.integers(0, 1095)))
         # Result turnaround varies by specimen type — blood cultures can take up to 7 days
         # for full AST panel, whereas urines may clear in 2-3 days. Sample 2-8 inclusive.
         rdate = cdate + timedelta(days=int(rng.integers(2, 9)))
@@ -324,27 +324,51 @@ st.sidebar.title("🧫 AMR Dashboard")
 st.sidebar.caption("Nigerian Antimicrobial Resistance Surveillance — Prototype")
 
 st.sidebar.subheader("Filters")
-year_f = st.sidebar.multiselect("Year", sorted(isolates_df["year"].unique()),
-                                  default=sorted(isolates_df["year"].unique()))
-ftype_f = st.sidebar.multiselect("Facility type", sorted(isolates_df["facility_type"].unique()),
-                                  default=sorted(isolates_df["facility_type"].unique()))
-zone_f = st.sidebar.multiselect("Geopolitical zone", sorted(isolates_df["zone"].unique()),
-                                  default=sorted(isolates_df["zone"].unique()))
-fac_f = st.sidebar.multiselect("Facility", sorted(isolates_df["facility"].unique()),
-                                default=sorted(isolates_df["facility"].unique()))
-spec_f = st.sidebar.multiselect("Specimen type", sorted(isolates_df["specimen_type"].unique()),
-                                 default=sorted(isolates_df["specimen_type"].unique()))
-ward_f = st.sidebar.multiselect("Ward type", sorted(isolates_df["ward_type"].unique()),
-                                 default=sorted(isolates_df["ward_type"].unique()))
+st.sidebar.caption("Leave a filter empty to include all values.")
 
-iso_f = isolates_df[
-    isolates_df["year"].isin(year_f)
-    & isolates_df["facility_type"].isin(ftype_f)
-    & isolates_df["zone"].isin(zone_f)
-    & isolates_df["facility"].isin(fac_f)
-    & isolates_df["specimen_type"].isin(spec_f)
-    & isolates_df["ward_type"].isin(ward_f)
-]
+# Empty-selection-means-all is implemented by starting each multiselect with default=[]
+# and bypassing the filter when the list is empty. Users can still pick specific values.
+year_f = st.sidebar.multiselect("Year", sorted(isolates_df["year"].unique()), default=[])
+
+zone_f = st.sidebar.multiselect("Geopolitical zone",
+                                 sorted(isolates_df["zone"].unique()), default=[])
+
+# Facility options cascade from the zone selection — if the user picks "South West",
+# only LUTH, UCH and LASUTH appear in the facility dropdown. If no zone is selected,
+# all facilities are available.
+if zone_f:
+    available_facilities = sorted(
+        isolates_df[isolates_df["zone"].isin(zone_f)]["facility"].unique()
+    )
+else:
+    available_facilities = sorted(isolates_df["facility"].unique())
+
+fac_f = st.sidebar.multiselect("Facility", available_facilities, default=[])
+
+spec_f = st.sidebar.multiselect("Specimen type",
+                                 sorted(isolates_df["specimen_type"].unique()), default=[])
+ward_f = st.sidebar.multiselect("Ward type",
+                                 sorted(isolates_df["ward_type"].unique()), default=[])
+
+# Facility type filter is hidden for v1 — all 12 facilities are public tertiary, so the
+# filter has nothing to discriminate on. Will return when secondary / primary sites
+# are added to the dataset. The column itself is preserved for geography and KPI logic.
+
+
+def apply_filter(df: pd.DataFrame, column: str, selection: list) -> pd.DataFrame:
+    """Return df unchanged if selection is empty; otherwise filter by isin(selection)."""
+    if not selection:
+        return df
+    return df[df[column].isin(selection)]
+
+
+iso_f = isolates_df
+iso_f = apply_filter(iso_f, "year", year_f)
+iso_f = apply_filter(iso_f, "zone", zone_f)
+iso_f = apply_filter(iso_f, "facility", fac_f)
+iso_f = apply_filter(iso_f, "specimen_type", spec_f)
+iso_f = apply_filter(iso_f, "ward_type", ward_f)
+
 ast_f = ast_full[ast_full["isolate_id"].isin(iso_f["isolate_id"])]
 
 st.sidebar.markdown("---")
@@ -398,84 +422,90 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
      "👥 Demographics", "🗺️ Geography", "📋 Raw data"]
 )
 
-# ---- Tab 1 ----
+# ---- Tab 1: Overview — focused "what should I worry about?" view ----
 with tab1:
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Isolates over time")
-        m = iso_f.groupby("month").size().reset_index(name="count").sort_values("month")
-        fig = px.line(m, x="month", y="count", markers=True)
-        fig.update_layout(xaxis_title="Month", yaxis_title="Isolates",
-                           hovermode="x unified", height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        st.subheader("Specimen distribution")
-        sp = iso_f["specimen_type"].value_counts().reset_index()
-        sp.columns = ["specimen_type", "count"]
-        sp["pct"] = (sp["count"] / sp["count"].sum() * 100).round(1)
-        fig = px.bar(sp, x="count", y="specimen_type", orientation="h", text="pct",
-                      hover_data=["count"])
+    st.subheader("Resistance markers over time")
+    st.caption("Tracks the three headline resistance markers across quarters for the "
+                "current filter selection.")
+
+    t = iso_f.copy()
+    t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
+
+    sa_t = t[t["organism"] == "Staphylococcus aureus"].groupby("period").apply(
+        lambda g: (g["MRSA_status"] == "MRSA").mean() * 100, include_groups=False
+    ).reset_index(name="MRSA %")
+    esbl_t = t[t["organism"].isin(ENTEROBACTERALES)
+                & t["ESBL_status"].isin(["Positive", "Negative"])].groupby("period").apply(
+        lambda g: (g["ESBL_status"] == "Positive").mean() * 100, include_groups=False
+    ).reset_index(name="ESBL %")
+    carb_t = t[t["carbapenem_resistant"].isin(["Yes", "No"])
+                & t["organism"].isin(ENTEROBACTERALES)].groupby("period").apply(
+        lambda g: (g["carbapenem_resistant"] == "Yes").mean() * 100, include_groups=False
+    ).reset_index(name="Carbapenem-R %")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=sa_t["period"], y=sa_t["MRSA %"],
+                              mode="lines+markers", name="MRSA"))
+    fig.add_trace(go.Scatter(x=esbl_t["period"], y=esbl_t["ESBL %"],
+                              mode="lines+markers", name="ESBL"))
+    fig.add_trace(go.Scatter(x=carb_t["period"], y=carb_t["Carbapenem-R %"],
+                              mode="lines+markers", name="Carbapenem-R"))
+    fig.update_layout(xaxis_title="Quarter", yaxis_title="% resistant",
+                       hovermode="x unified", height=440, yaxis_range=[0, 100])
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Top resistance concerns")
+    st.caption("The five highest-resistance organism × antibiotic pairs in the current "
+                "selection. Use this as a quick 'what to watch' list.")
+
+    # Rank all organism × antibiotic pairs by %R, requiring a minimum volume so tiny
+    # denominators don't dominate the top of the list.
+    MIN_TESTS = 30
+    concerns = (ast_f.groupby(["organism", "antibiotic", "antibiotic_class"])
+                 .agg(n_tested=("interpretation", "count"),
+                      n_r=("interpretation", lambda x: (x == "R").sum()))
+                 .reset_index())
+    concerns["pct_r"] = (concerns["n_r"] / concerns["n_tested"] * 100).round(1)
+
+    # Exclude combinations with well-known intrinsic / near-universal resistance that
+    # aren't clinically actionable — e.g. ampicillin in Gram-negatives is essentially
+    # always resistant by nature, so clinicians don't use it empirically. Surfacing it
+    # as a "top concern" adds noise to the signal.
+    INTRINSIC_R_GRAM_NEG = ["Escherichia coli", "Klebsiella pneumoniae",
+                             "Proteus mirabilis", "Enterobacter cloacae",
+                             "Salmonella Typhi", "Pseudomonas aeruginosa",
+                             "Acinetobacter baumannii"]
+    mask_intrinsic = ((concerns["organism"].isin(INTRINSIC_R_GRAM_NEG))
+                       & (concerns["antibiotic"] == "Ampicillin"))
+    concerns = concerns[~mask_intrinsic]
+
+    concerns = concerns[concerns["n_tested"] >= MIN_TESTS].sort_values("pct_r", ascending=False).head(5)
+
+    if len(concerns) == 0:
+        st.info(f"Not enough test volume to rank concerns (need at least {MIN_TESTS} tests "
+                "per organism × antibiotic pair in the current filter).")
+    else:
+        concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
+        fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
+                      text="pct_r", color="pct_r", color_continuous_scale="Reds",
+                      range_color=[0, 100], hover_data={"n_tested": True,
+                                                         "antibiotic_class": True,
+                                                         "label": False, "pct_r": False})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        fig.update_layout(xaxis_title="Isolates", yaxis_title="", height=380,
-                           yaxis={"categoryorder": "total ascending"})
+        fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
+                           height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-    c3, c4 = st.columns(2)
-    with c3:
-        st.subheader("Isolates by facility type")
-        ft = iso_f["facility_type"].value_counts().reset_index()
-        ft.columns = ["facility_type", "count"]
-        fig = px.bar(ft, x="count", y="facility_type", orientation="h")
-        fig.update_layout(xaxis_title="Isolates", yaxis_title="", height=380,
-                           yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig, use_container_width=True)
-    with c4:
-        st.subheader("Isolates by ward")
-        wd = iso_f["ward_type"].value_counts().reset_index()
-        wd.columns = ["ward_type", "count"]
-        fig = px.bar(wd, x="count", y="ward_type", orientation="h")
-        fig.update_layout(xaxis_title="Isolates", yaxis_title="", height=380,
-                           yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig, use_container_width=True)
-
-    c5, c6 = st.columns(2)
-    with c5:
-        st.subheader("Patient age by sex")
-        fig = px.histogram(iso_f, x="patient_age", nbins=20, color="patient_sex",
-                            barmode="overlay", opacity=0.7)
-        fig.update_layout(xaxis_title="Age (years)", yaxis_title="Isolates", height=380)
-        st.plotly_chart(fig, use_container_width=True)
-    with c6:
-        st.subheader("Resistance markers over time")
-        t = iso_f.copy()
-        t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
-
-        sa_t = t[t["organism"] == "Staphylococcus aureus"].groupby("period").apply(
-            lambda g: (g["MRSA_status"] == "MRSA").mean() * 100, include_groups=False
-        ).reset_index(name="MRSA %")
-        esbl_t = t[t["organism"].isin(ENTEROBACTERALES)
-                    & t["ESBL_status"].isin(["Positive", "Negative"])].groupby("period").apply(
-            lambda g: (g["ESBL_status"] == "Positive").mean() * 100, include_groups=False
-        ).reset_index(name="ESBL %")
-        carb_t = t[t["carbapenem_resistant"].isin(["Yes", "No"])
-                    & t["organism"].isin(ENTEROBACTERALES)].groupby("period").apply(
-            lambda g: (g["carbapenem_resistant"] == "Yes").mean() * 100, include_groups=False
-        ).reset_index(name="Carbapenem-R %")
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=sa_t["period"], y=sa_t["MRSA %"], mode="lines+markers", name="MRSA"))
-        fig.add_trace(go.Scatter(x=esbl_t["period"], y=esbl_t["ESBL %"], mode="lines+markers", name="ESBL"))
-        fig.add_trace(go.Scatter(x=carb_t["period"], y=carb_t["Carbapenem-R %"],
-                                   mode="lines+markers", name="Carbapenem-R"))
-        fig.update_layout(xaxis_title="Quarter", yaxis_title="% resistant",
-                           hovermode="x unified", height=380, yaxis_range=[0, 100])
-        st.plotly_chart(fig, use_container_width=True)
+        show = concerns[["organism", "antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
+        show.columns = ["Organism", "Antibiotic", "Class", "% Resistant", "Isolates tested"]
+        st.dataframe(show, hide_index=True, use_container_width=True)
 
 # ---- Tab 2 ----
 with tab2:
     c1, c2 = st.columns([2, 1])
     with c1:
-        st.subheader("Pathogen frequency")
+        st.subheader("Most isolated organisms")
         oc = iso_f["organism"].value_counts().reset_index()
         oc.columns = ["organism", "count"]
         oc["pct"] = (oc["count"] / oc["count"].sum() * 100).round(1)
@@ -491,7 +521,7 @@ with tab2:
     st.markdown("---")
     st.subheader("Organism × specimen heatmap")
     piv = pd.crosstab(iso_f["organism"], iso_f["specimen_type"])
-    fig = px.imshow(piv, aspect="auto", color_continuous_scale="Blues",
+    fig = px.imshow(piv, aspect="auto", color_continuous_scale="OrRd",
                      labels={"color": "Count"})
     fig.update_layout(height=500)
     st.plotly_chart(fig, use_container_width=True)
@@ -531,7 +561,7 @@ with tab3:
         with c2:
             st.markdown(f"**{sel}** — {oa['isolate_id'].nunique():,} isolates")
             disp = summary[["antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
-            disp.columns = ["Antibiotic", "Class", "%R", "n"]
+            disp.columns = ["Antibiotic", "Class", "% Resistant", "Isolates tested"]
             st.dataframe(disp, hide_index=True, use_container_width=True)
 
     st.markdown("---")
@@ -574,7 +604,7 @@ with tab4:
                                  if "Meropenem" in org_abs else 0,
                                  key="trend_ab")
         with col_c:
-            period = st.radio("Period", ["Monthly", "Quarterly"], horizontal=True,
+            period = st.radio("Period", ["Quarterly", "Monthly"], horizontal=True,
                               key="trend_period")
 
         # Optional facility comparison
@@ -717,85 +747,44 @@ with tab5:
 
         d_data = ast_f[(ast_f["organism"] == d_org) & (ast_f["antibiotic"] == d_ab)].copy()
 
-        # Age group ordering used across all three charts below
+        # Age group ordering for the chart below
         age_order = ["<1 year", "1-4", "5-14", "15-44", "45-64", "65+"]
 
         if len(d_data) == 0:
             st.warning("No records for this combination.")
         else:
-            c1, c2 = st.columns(2)
-
-            # By age group
-            with c1:
-                st.markdown("**Resistance by age group**")
-                age_sum = (d_data.groupby("patient_age_group")
-                            .agg(n=("interpretation", "count"),
-                                 n_r=("interpretation", lambda x: (x == "R").sum()))
-                            .reset_index())
-                age_sum["pct_r"] = (age_sum["n_r"] / age_sum["n"] * 100).round(1)
-                age_sum["patient_age_group"] = pd.Categorical(
-                    age_sum["patient_age_group"], categories=age_order, ordered=True
-                )
-                age_sum = age_sum.sort_values("patient_age_group")
-
-                fig = px.bar(age_sum, x="patient_age_group", y="pct_r", text="pct_r",
-                              color="pct_r", color_continuous_scale="RdYlGn_r",
-                              range_color=[0, 100], hover_data=["n"])
-                fig.update_traces(texttemplate="%{text}%", textposition="outside")
-                fig.update_layout(xaxis_title="Age group",
-                                   yaxis_title=f"% Resistant to {d_ab}",
-                                   yaxis_range=[0, 110], height=400,
-                                   coloraxis_showscale=False)
-                st.plotly_chart(fig, use_container_width=True)
-
-            # By sex
-            with c2:
-                st.markdown("**Resistance by sex**")
-                sex_sum = (d_data.groupby("patient_sex")
-                            .agg(n=("interpretation", "count"),
-                                 n_r=("interpretation", lambda x: (x == "R").sum()))
-                            .reset_index())
-                sex_sum["pct_r"] = (sex_sum["n_r"] / sex_sum["n"] * 100).round(1)
-
-                fig = px.bar(sex_sum, x="patient_sex", y="pct_r", text="pct_r",
-                              color="patient_sex", hover_data=["n"])
-                fig.update_traces(texttemplate="%{text}%", textposition="outside")
-                fig.update_layout(xaxis_title="Sex",
-                                   yaxis_title=f"% Resistant to {d_ab}",
-                                   yaxis_range=[0, 110], height=400, showlegend=False)
-                st.plotly_chart(fig, use_container_width=True)
-
-            # Combined age × sex
-            st.markdown("**Resistance by age group × sex**")
-            combo = (d_data.groupby(["patient_age_group", "patient_sex"])
-                      .agg(n=("interpretation", "count"),
-                           n_r=("interpretation", lambda x: (x == "R").sum()))
-                      .reset_index())
-            combo["pct_r"] = (combo["n_r"] / combo["n"] * 100).round(1)
-            combo["patient_age_group"] = pd.Categorical(
-                combo["patient_age_group"], categories=age_order, ordered=True
+            st.markdown("**Resistance by age group**")
+            age_sum = (d_data.groupby("patient_age_group")
+                        .agg(n=("interpretation", "count"),
+                             n_r=("interpretation", lambda x: (x == "R").sum()))
+                        .reset_index())
+            age_sum["pct_r"] = (age_sum["n_r"] / age_sum["n"] * 100).round(1)
+            age_sum["patient_age_group"] = pd.Categorical(
+                age_sum["patient_age_group"], categories=age_order, ordered=True
             )
-            combo = combo.sort_values("patient_age_group")
+            age_sum = age_sum.sort_values("patient_age_group")
 
-            fig = px.bar(combo, x="patient_age_group", y="pct_r", color="patient_sex",
-                          barmode="group", text="pct_r", hover_data=["n"])
+            fig = px.bar(age_sum, x="patient_age_group", y="pct_r", text="pct_r",
+                          color="pct_r", color_continuous_scale="RdYlGn_r",
+                          range_color=[0, 100], hover_data=["n"])
             fig.update_traces(texttemplate="%{text}%", textposition="outside")
             fig.update_layout(xaxis_title="Age group",
                                yaxis_title=f"% Resistant to {d_ab}",
-                               yaxis_range=[0, 110], height=420)
+                               yaxis_range=[0, 110], height=420,
+                               coloraxis_showscale=False)
             st.plotly_chart(fig, use_container_width=True)
 
-            # Sample size warning
-            small_cells = combo[combo["n"] < 10]
+            # Sample size warning — flag any age group with low test volume
+            small_cells = age_sum[age_sum["n"] < 10]
             if len(small_cells) > 0:
                 st.warning(
-                    f"⚠️ {len(small_cells)} age × sex cells have fewer than 10 tests. "
+                    f"⚠️ {len(small_cells)} age group(s) have fewer than 10 tests. "
                     "Interpret those rates with caution."
                 )
 
             with st.expander("Data table"):
-                show = combo[["patient_age_group", "patient_sex", "n", "n_r", "pct_r"]].copy()
-                show.columns = ["Age group", "Sex", "n tested", "n resistant", "%R"]
+                show = age_sum[["patient_age_group", "n", "n_r", "pct_r"]].copy()
+                show.columns = ["Age group", "Isolates tested", "Resistant", "% Resistant"]
                 st.dataframe(show, hide_index=True, use_container_width=True)
 
 # ---- Tab 6: Geography ----
@@ -860,12 +849,7 @@ with tab7:
         )
         st.dataframe(iso_f[cols].head(500), use_container_width=True, hide_index=True)
         if len(iso_f) > 500:
-            st.caption(f"Showing first 500 of {len(iso_f):,} rows. "
-                        f"Download the CSV to access all {len(iso_f):,} isolates.")
-        st.download_button("⬇️ Download isolates CSV",
-                            iso_f.to_csv(index=False).encode("utf-8"),
-                            f"ng_amr_isolates_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv")
+            st.caption(f"Showing first 500 of {len(iso_f):,} rows.")
     else:
         st.markdown(f"**{len(ast_f):,}** AST results")
         cols = st.multiselect(
@@ -877,12 +861,14 @@ with tab7:
         )
         st.dataframe(ast_f[cols].head(500), use_container_width=True, hide_index=True)
         if len(ast_f) > 500:
-            st.caption(f"Showing first 500 of {len(ast_f):,} rows. "
-                        f"Download the CSV to access all {len(ast_f):,} AST results.")
-        st.download_button("⬇️ Download AST long-format CSV",
-                            ast_f.to_csv(index=False).encode("utf-8"),
-                            f"ng_amr_ast_long_{datetime.now().strftime('%Y%m%d')}.csv",
-                            "text/csv")
+            st.caption(f"Showing first 500 of {len(ast_f):,} rows.")
+
+    st.markdown("---")
+    st.info(
+        "**Data access**  \n"
+        "Data access for research, policy, or institutional use is available on request. "
+        "Contact: abimbola@abimbolaoba.com"
+    )
 
 st.markdown("---")
 st.caption(
