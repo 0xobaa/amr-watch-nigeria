@@ -38,6 +38,7 @@ st.caption(
     "For the best experience, view on a desktop or laptop browser. "
     "Mobile optimisation is coming in the next version."
 )
+
 # ---------------------------------------------------------------------------
 # Reference registries
 # ---------------------------------------------------------------------------
@@ -618,41 +619,20 @@ with tab1, tab_guard():
             "resistance patterns."
         )
     else:
-        # Trend direction — compares first-half vs second-half quarterly rates for each pair.
-        # Uses ast_f (the filtered AST table) so the trend reflects the current selection.
-        concerns["Trend"] = concerns.apply(
-            lambda row: calculate_trend(ast_f, row["organism"], row["antibiotic"]),
-            axis=1,
-        )
-
         concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
         fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
                       text="pct_r", color="pct_r", color_continuous_scale="Reds",
                       range_color=[0, 100], hover_data={"n_tested": True,
                                                          "antibiotic_class": True,
-                                                         "Trend": True,
                                                          "label": False, "pct_r": False})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
                            height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        display_concerns = concerns[["organism", "antibiotic", "pct_r",
-                                      "n_tested", "Trend"]].copy()
-        display_concerns.columns = ["Organism", "Antibiotic", "% Resistant",
-                                     "Isolates tested", "Trend"]
-
-        def style_trend(val):
-            if "Rising" in str(val):
-                return "color: red; font-weight: bold"
-            elif "Falling" in str(val):
-                return "color: green; font-weight: bold"
-            elif "Stable" in str(val):
-                return "color: grey"
-            return ""
-
-        styled_concerns = display_concerns.style.map(style_trend, subset=["Trend"])
-        st.dataframe(styled_concerns, use_container_width=True, hide_index=True)
+        display_concerns = concerns[["organism", "antibiotic", "pct_r", "n_tested"]].copy()
+        display_concerns.columns = ["Organism", "Antibiotic", "% Resistant", "Isolates tested"]
+        st.dataframe(display_concerns, use_container_width=True, hide_index=True)
 
 # ---- Tab 2 ----
 with tab2, tab_guard():
