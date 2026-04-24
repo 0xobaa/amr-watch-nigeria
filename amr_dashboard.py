@@ -21,6 +21,8 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
+from scipy import stats
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 # ---------------------------------------------------------------------------
@@ -100,6 +102,24 @@ def _age_group(age: int) -> str:
     if age < 45: return "15-44"
     if age < 65: return "45-64"
     return "65+"
+
+
+def wilson_confidence_interval(n_r: int, n_tested: int, confidence: float = 0.95):
+    """Wilson score interval for a proportion. Returns (lower, upper) on 0-100 scale.
+
+    Wide when n is small, narrow when n is large — communicates reliability visually
+    without forcing the user to interpret raw counts.
+    """
+    if n_tested == 0:
+        return 0.0, 0.0
+    p = n_r / n_tested
+    z = stats.norm.ppf((1 + confidence) / 2)
+    denominator = 1 + z ** 2 / n_tested
+    center = (p + z ** 2 / (2 * n_tested)) / denominator
+    margin = (z * (p * (1 - p) / n_tested + z ** 2 / (4 * n_tested ** 2)) ** 0.5) / denominator
+    lower = max(0.0, (center - margin) * 100)
+    upper = min(100.0, (center + margin) * 100)
+    return round(lower, 1), round(upper, 1)
 
 
 def _generate_ast_panel(org, context_mult, rng):
@@ -198,19 +218,12 @@ def _generate_ast_panel(org, context_mult, rng):
 
 
 @st.cache_data
-def generate_amr_dataset(n_isolates: int = 4500, seed: int = 42):
+def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
     rng = np.random.default_rng(seed)
 
-    # Patient pool — ~18% of patients will have more than one isolate
+    # Patient pool — some patients contribute multiple isolates (see weight comment below)
     n_patients = int(n_isolates * 0.82)
-    patient_ids = [f"PT-NG-{i+1:06d}" for i in range(n_patients)]
-    patients = {
-        pid: {
-            "age": int(np.clip(rng.normal(38, 22), 0, 95)),
-            "sex": str(rng.choice(["Male", "Female"], p=[0.48, 0.52])),
-        }
-        for pid in patient_ids
-    }
+
     # Sampling weights determine how likely each patient is to be picked for a new isolate.
     # Most patients have weight 1 (single isolate); a minority get higher weights so they
     # appear multiple times in the output — simulating repeat cultures from the same patient,
@@ -219,38 +232,55 @@ def generate_amr_dataset(n_isolates: int = 4500, seed: int = 42):
     pw = rng.choice([1, 1, 1, 2, 3], size=n_patients, p=[0.7, 0.1, 0.05, 0.1, 0.05]).astype(float)
     pw /= pw.sum()
 
+    # Vectorise the per-patient attributes once, rather than per-isolate via a dict lookup
+    patient_ages = np.clip(rng.normal(38, 22, size=n_patients), 0, 95).astype(int)
+    patient_sexes = rng.choice(["Male", "Female"], size=n_patients, p=[0.48, 0.52])
+
     fac_names = list(FACILITIES.keys())
     fw = np.array([FACILITIES[f]["weight"] for f in fac_names])
     fw /= fw.sum()
+
+    # --- Batch sampling: do all of these in one call each rather than n_isolates × 6 calls.
+    # This is what keeps 30k generation fast (~3 seconds instead of ~2+ minutes).
+    pid_idx = rng.choice(n_patients, size=n_isolates, p=pw)
+    fac_idx = rng.choice(len(fac_names), size=n_isolates, p=fw)
+    org_keys = list(ORGANISMS.keys())
+    org_idx = rng.choice(len(org_keys), size=n_isolates, p=list(ORGANISMS.values()))
+    spec_keys = list(SPECIMENS.keys())
+    spec_idx = rng.choice(len(spec_keys), size=n_isolates, p=list(SPECIMENS.values()))
+    ward_keys = list(WARDS.keys())
+    ward_idx = rng.choice(len(ward_keys), size=n_isolates, p=list(WARDS.values()))
+
+    day_offsets = rng.integers(0, 1095, size=n_isolates)
+    tat_days = rng.integers(2, 9, size=n_isolates)  # turnaround 2-8 days inclusive
 
     start = datetime(2023, 1, 1)
 
     isolates, ast_rows = [], []
     for i in range(n_isolates):
-        pid = str(rng.choice(patient_ids, p=pw))
-        p = patients[pid]
-        fac = str(rng.choice(fac_names, p=fw))
+        pid_i = int(pid_idx[i])
+        pid = f"PT-NG-{pid_i + 1:06d}"
+        fac = fac_names[int(fac_idx[i])]
         fmeta = FACILITIES[fac]
-        org = str(rng.choice(list(ORGANISMS.keys()), p=list(ORGANISMS.values())))
-        spec = str(rng.choice(list(SPECIMENS.keys()), p=list(SPECIMENS.values())))
-        ward = str(rng.choice(list(WARDS.keys()), p=list(WARDS.values())))
+        org = org_keys[int(org_idx[i])]
+        spec = spec_keys[int(spec_idx[i])]
+        ward = ward_keys[int(ward_idx[i])]
 
-        cdate = start + timedelta(days=int(rng.integers(0, 1095)))
-        # Result turnaround varies by specimen type — blood cultures can take up to 7 days
-        # for full AST panel, whereas urines may clear in 2-3 days. Sample 2-8 inclusive.
-        rdate = cdate + timedelta(days=int(rng.integers(2, 9)))
+        cdate = start + timedelta(days=int(day_offsets[i]))
+        rdate = cdate + timedelta(days=int(tat_days[i]))
 
         context_mult = (WARD_MULT[ward]
                          * FACILITY_TYPE_MULT[fmeta["type"]]
                          * (1 + 0.03 * (cdate.year - 2023)))
 
         iid = f"NG-{cdate.year}-{i+1:05d}"
+        age = int(patient_ages[pid_i])
         row = {
             "isolate_id": iid,
             "patient_id": pid,
-            "patient_age": p["age"],
-            "patient_age_group": _age_group(p["age"]),
-            "patient_sex": p["sex"],
+            "patient_age": age,
+            "patient_age_group": _age_group(age),
+            "patient_sex": str(patient_sexes[pid_i]),
             "collection_date": cdate,
             "result_date": rdate,
             "year": cdate.year,
@@ -326,8 +356,7 @@ st.sidebar.caption("Nigerian Antimicrobial Resistance Surveillance — Prototype
 st.sidebar.subheader("Filters")
 st.sidebar.caption("Leave a filter empty to include all values.")
 
-# Empty-selection-means-all is implemented by starting each multiselect with default=[]
-# and bypassing the filter when the list is empty. Users can still pick specific values.
+# Primary filters — always visible for quick exploration
 year_f = st.sidebar.multiselect("Year", sorted(isolates_df["year"].unique()), default=[])
 
 zone_f = st.sidebar.multiselect("Geopolitical zone",
@@ -345,10 +374,13 @@ else:
 
 fac_f = st.sidebar.multiselect("Facility", available_facilities, default=[])
 
-spec_f = st.sidebar.multiselect("Specimen type",
-                                 sorted(isolates_df["specimen_type"].unique()), default=[])
-ward_f = st.sidebar.multiselect("Ward type",
-                                 sorted(isolates_df["ward_type"].unique()), default=[])
+# Advanced filters — collapsed by default. Specimen and ward are power-user filters
+# that often over-constrain a first-look exploration if left visible.
+with st.sidebar.expander("Advanced filters", expanded=False):
+    spec_f = st.multiselect("Specimen type",
+                             sorted(isolates_df["specimen_type"].unique()), default=[])
+    ward_f = st.multiselect("Ward type",
+                             sorted(isolates_df["ward_type"].unique()), default=[])
 
 # Facility type filter is hidden for v1 — all 12 facilities are public tertiary, so the
 # filter has nothing to discriminate on. Will return when secondary / primary sites
@@ -422,8 +454,25 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
      "👥 Demographics", "🗺️ Geography", "📋 Raw data"]
 )
 
+
+# Friendly empty-state handler. Wrapping each tab's content prevents one failure
+# from taking down the whole dashboard. The Details expander still shows the raw
+# error for debugging — this should never be hidden from the developer, only from
+# the end user on first glance.
+@contextmanager
+def tab_guard():
+    try:
+        yield
+    except Exception as exc:
+        st.info(
+            "Limited data for the current filter combination. Try broadening your "
+            "selection — for example, choose a wider date range or include more facilities."
+        )
+        with st.expander("Technical details (for debugging)"):
+            st.code(f"{type(exc).__name__}: {exc}")
+
 # ---- Tab 1: Overview — focused "what should I worry about?" view ----
-with tab1:
+with tab1, tab_guard():
     st.subheader("Resistance markers over time")
     st.caption("Tracks the three headline resistance markers across quarters for the "
                 "current filter selection.")
@@ -431,39 +480,66 @@ with tab1:
     t = iso_f.copy()
     t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
 
+    # Include n per period so we can hide low-volume periods where the rate would be
+    # driven by 2-3 isolates rather than real signal.
+    MIN_PERIOD_N = 20
+
     sa_t = t[t["organism"] == "Staphylococcus aureus"].groupby("period").apply(
-        lambda g: (g["MRSA_status"] == "MRSA").mean() * 100, include_groups=False
-    ).reset_index(name="MRSA %")
+        lambda g: pd.Series({
+            "MRSA %": (g["MRSA_status"] == "MRSA").mean() * 100,
+            "n": len(g),
+        }),
+        include_groups=False,
+    ).reset_index()
+    sa_t = sa_t[sa_t["n"] >= MIN_PERIOD_N]
+
     esbl_t = t[t["organism"].isin(ENTEROBACTERALES)
                 & t["ESBL_status"].isin(["Positive", "Negative"])].groupby("period").apply(
-        lambda g: (g["ESBL_status"] == "Positive").mean() * 100, include_groups=False
-    ).reset_index(name="ESBL %")
+        lambda g: pd.Series({
+            "ESBL %": (g["ESBL_status"] == "Positive").mean() * 100,
+            "n": len(g),
+        }),
+        include_groups=False,
+    ).reset_index()
+    esbl_t = esbl_t[esbl_t["n"] >= MIN_PERIOD_N]
+
     carb_t = t[t["carbapenem_resistant"].isin(["Yes", "No"])
                 & t["organism"].isin(ENTEROBACTERALES)].groupby("period").apply(
-        lambda g: (g["carbapenem_resistant"] == "Yes").mean() * 100, include_groups=False
-    ).reset_index(name="Carbapenem-R %")
+        lambda g: pd.Series({
+            "Carbapenem-R %": (g["carbapenem_resistant"] == "Yes").mean() * 100,
+            "n": len(g),
+        }),
+        include_groups=False,
+    ).reset_index()
+    carb_t = carb_t[carb_t["n"] >= MIN_PERIOD_N]
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=sa_t["period"], y=sa_t["MRSA %"],
-                              mode="lines+markers", name="MRSA"))
+                              mode="lines+markers", name="MRSA",
+                              customdata=sa_t["n"],
+                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>MRSA</extra>"))
     fig.add_trace(go.Scatter(x=esbl_t["period"], y=esbl_t["ESBL %"],
-                              mode="lines+markers", name="ESBL"))
+                              mode="lines+markers", name="ESBL",
+                              customdata=esbl_t["n"],
+                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>ESBL</extra>"))
     fig.add_trace(go.Scatter(x=carb_t["period"], y=carb_t["Carbapenem-R %"],
-                              mode="lines+markers", name="Carbapenem-R"))
+                              mode="lines+markers", name="Carbapenem-R",
+                              customdata=carb_t["n"],
+                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>Carbapenem-R</extra>"))
     fig.update_layout(xaxis_title="Quarter", yaxis_title="% resistant",
                        hovermode="x unified", height=440, yaxis_range=[0, 100])
     st.plotly_chart(fig, use_container_width=True)
+    st.caption(f"Periods with fewer than {MIN_PERIOD_N} isolates are hidden to avoid noise.")
 
     st.markdown("---")
     st.subheader("Top resistance concerns")
     st.caption("The five highest-resistance organism × antibiotic pairs in the current "
                 "selection. Use this as a quick 'what to watch' list.")
 
-    # Rank all organism × antibiotic pairs by %R, requiring a minimum volume so tiny
-    # denominators don't dominate the top of the list. The threshold scales with the
-    # filtered selection size so tight filters (single facility + specimen type) still
-    # produce results rather than always hitting the "not enough volume" message.
-    MIN_TESTS = max(10, min(30, len(iso_f) // 50))
+    # Rank all organism × antibiotic pairs by %R. The threshold is 5 (rather than the
+    # earlier 30) so that tight filter combinations still produce a useful panel; rows
+    # with n < 10 are flagged as Low confidence so clinicians know to interpret cautiously.
+    MIN_TESTS = 5
     concerns = (ast_f.groupby(["organism", "antibiotic", "antibiotic_class"])
                  .agg(n_tested=("interpretation", "count"),
                       n_r=("interpretation", lambda x: (x == "R").sum()))
@@ -488,26 +564,39 @@ with tab1:
     concerns = concerns[concerns["n_tested"] >= MIN_TESTS].sort_values("pct_r", ascending=False).head(5)
 
     if len(concerns) == 0:
-        st.info(f"Not enough test volume to rank concerns (need at least {MIN_TESTS} tests "
-                "per organism × antibiotic pair in the current filter).")
+        st.info(
+            "Limited data in the current filter combination to rank resistance concerns. "
+            "Broaden filters (wider date range or more facilities) to see facility-wide "
+            "resistance patterns."
+        )
     else:
+        concerns["confidence"] = concerns["n_tested"].apply(
+            lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
+        )
+        if (concerns["n_tested"] < 10).any():
+            st.caption("⚠️ Some entries have fewer than 10 tests and are marked **Low** "
+                        "confidence. Interpret with caution.")
+
         concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
         fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
                       text="pct_r", color="pct_r", color_continuous_scale="Reds",
                       range_color=[0, 100], hover_data={"n_tested": True,
                                                          "antibiotic_class": True,
+                                                         "confidence": True,
                                                          "label": False, "pct_r": False})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
                            height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        show = concerns[["organism", "antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
-        show.columns = ["Organism", "Antibiotic", "Class", "% Resistant", "Isolates tested"]
+        show = concerns[["organism", "antibiotic", "antibiotic_class", "pct_r",
+                         "n_tested", "confidence"]].copy()
+        show.columns = ["Organism", "Antibiotic", "Class", "% Resistant",
+                        "Isolates tested", "Confidence"]
         st.dataframe(show, hide_index=True, use_container_width=True)
 
 # ---- Tab 2 ----
-with tab2:
+with tab2, tab_guard():
     c1, c2 = st.columns([2, 1])
     with c1:
         st.subheader("Most isolated organisms")
@@ -532,7 +621,7 @@ with tab2:
     st.plotly_chart(fig, use_container_width=True)
 
 # ---- Tab 3: Antibiograms — the big win of long format ----
-with tab3:
+with tab3, tab_guard():
     st.subheader("Antibiogram — resistance profile by organism")
 
     orgs = sorted(ast_f["organism"].unique())
@@ -552,18 +641,26 @@ with tab3:
         summary["n_tested"] = summary["n_tested"].astype(int)
         summary["n_r"] = summary["n_r"].astype(int)
         summary["pct_r"] = (summary["n_r"] / summary["n_tested"] * 100).round(1)
-        summary = summary[summary["n_tested"] >= 10].sort_values("pct_r")
+        summary = summary[summary["n_tested"] >= 5].sort_values("pct_r")
+
+        # Confidence label — informs clinicians which rates to trust
+        summary["confidence"] = summary["n_tested"].apply(
+            lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
+        )
 
         if len(summary) == 0:
             st.info("Not enough tests per antibiotic to display an antibiogram for this "
                     "organism under the current filter. Try broadening the selection.")
         else:
+            if (summary["n_tested"] < 10).any():
+                st.caption("⚠️ Bars marked **Low** confidence have fewer than 10 tests. "
+                            "Interpret with caution.")
             c1, c2 = st.columns([2, 1])
             with c1:
                 fig = px.bar(summary, x="pct_r", y="antibiotic", orientation="h",
                               text="pct_r", color="pct_r",
                               color_continuous_scale="RdYlGn_r", range_color=[0, 100],
-                              hover_data=["antibiotic_class", "n_tested"])
+                              hover_data=["antibiotic_class", "n_tested", "confidence"])
                 fig.update_traces(texttemplate="%{text}%", textposition="outside")
                 fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
                                    height=max(400, 40 * len(summary)),
@@ -571,8 +668,10 @@ with tab3:
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
                 st.markdown(f"**{sel}** — {oa['isolate_id'].nunique():,} isolates")
-                disp = summary[["antibiotic", "antibiotic_class", "pct_r", "n_tested"]].copy()
-                disp.columns = ["Antibiotic", "Class", "% Resistant", "Isolates tested"]
+                disp = summary[["antibiotic", "antibiotic_class", "pct_r",
+                                 "n_tested", "confidence"]].copy()
+                disp.columns = ["Antibiotic", "Class", "% Resistant",
+                                "Isolates tested", "Confidence"]
                 st.dataframe(disp, hide_index=True, use_container_width=True)
 
     st.markdown("---")
@@ -593,7 +692,7 @@ with tab3:
     st.plotly_chart(fig, use_container_width=True)
 
 # ---- Tab 4: Resistance trends — the early-warning clinical view ----
-with tab4:
+with tab4, tab_guard():
     st.subheader("Resistance trend — organism × antibiotic over time")
     st.caption("Track how resistance to a specific antibiotic has evolved for a given organism. "
                 "Useful for detecting emerging resistance and informing empirical therapy.")
@@ -625,13 +724,29 @@ with tab4:
         chosen_facs = None
         skip_chart = False
         if compare:
-            # Default to the 4 highest-volume facilities in the current selection, so the
-            # comparison starts with statistically meaningful signal rather than the 4 sites
-            # that happen to come first alphabetically.
+            # Default to the 3 highest-volume facilities in the current selection, so the
+            # comparison starts with statistically meaningful signal rather than the 3 sites
+            # that happen to come first alphabetically. Limiting to 3 keeps the chart
+            # readable — more than that becomes spaghetti.
             vol_ranked = (ast_f[ast_f["organism"] == t_org]["facility"]
                            .value_counts().index.tolist())
-            chosen_facs = st.multiselect("Facilities to compare", vol_ranked,
-                                          default=vol_ranked[:4])
+            try:
+                chosen_facs = st.multiselect(
+                    "Facilities to compare (max 3)", vol_ranked,
+                    default=vol_ranked[:3], max_selections=3,
+                )
+            except TypeError:
+                # Older Streamlit versions don't support max_selections — fall back to
+                # a soft limit with a warning.
+                chosen_facs = st.multiselect(
+                    "Facilities to compare (max 3)", vol_ranked,
+                    default=vol_ranked[:3],
+                )
+                if len(chosen_facs) > 3:
+                    st.warning("Please select a maximum of 3 facilities for a readable "
+                                "comparison. Using the first 3.")
+                    chosen_facs = chosen_facs[:3]
+
             if not chosen_facs:
                 st.info("Select at least one facility to enable comparison, "
                         "or uncheck 'Compare across facilities' to see a single combined trend.")
@@ -664,7 +779,8 @@ with tab4:
             trend_summary["n_r"] = trend_summary["n_r"].astype(int)
             trend_summary["pct_r"] = (trend_summary["n_r"] / trend_summary["n_tested"] * 100).round(1)
 
-            # Sort period chronologically
+            # Sort period chronologically BEFORE filtering, so rolling average preserves
+            # chronological ordering.
             if period == "Monthly":
                 trend_summary = trend_summary.sort_values("period")
             else:
@@ -673,71 +789,212 @@ with tab4:
                 )
                 trend_summary = trend_summary.sort_values("_sort").drop(columns="_sort")
 
-            # Main trend chart
-            if compare:
-                fig = px.line(trend_summary, x="period", y="pct_r", color="facility",
-                               markers=True, hover_data=["n_tested"])
-            else:
-                fig = px.line(trend_summary, x="period", y="pct_r", markers=True,
-                               hover_data=["n_tested"])
-            fig.update_layout(
-                xaxis_title="Month" if period == "Monthly" else "Quarter",
-                yaxis_title=f"% Resistant to {t_ab}",
-                yaxis_range=[0, 100], hovermode="x unified", height=450,
-                title=f"{t_org} — {t_ab} resistance trend",
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            # --- Fix 7: minimum period volume filter ---
+            # Hide periods based on fewer than 15 tests rather than show noisy rates
+            # that would mislead interpretation. The message below tells the user how
+            # many periods were hidden so they can broaden their filter if needed.
+            MIN_VOLUME = 15
+            low_volume_periods = trend_summary[trend_summary["n_tested"] < MIN_VOLUME]
+            trend_summary = trend_summary[trend_summary["n_tested"] >= MIN_VOLUME].reset_index(drop=True)
 
-            # Summary below
-            col_x, col_y, col_z = st.columns(3)
-            overall_r = (t_data["interpretation"] == "R").mean() * 100
-            total_tested = len(t_data)
-
-            # Latest-period %R — compute differently depending on compare mode
-            period_label = "month" if period == "Monthly" else "quarter"
-            if compare:
-                # Pool all facilities' tests in the latest period for a true weighted rate,
-                # rather than averaging facility-level percentages (which would over-weight
-                # low-volume sites).
-                latest_period = trend_summary["period"].iloc[-1]
-                latest_rows = trend_summary[trend_summary["period"] == latest_period]
-                latest_pct = (latest_rows["n_r"].sum() / latest_rows["n_tested"].sum() * 100) \
-                             if latest_rows["n_tested"].sum() > 0 else float("nan")
-                latest_label = f"Latest {period_label} %R (pooled)"
-                # len(latest_rows) = facilities with data in the latest period, which may be
-                # smaller than len(chosen_facs) if some sites had no tests that period.
-                n_with_data = len(latest_rows)
-                n_selected = len(chosen_facs)
-                latest_help = (
-                    f"Pooled rate across {n_with_data} of {n_selected} selected facilities "
-                    f"for {latest_period} (sites with no tests in that period are excluded). "
-                    f"Weighted by test volume, not a simple average of facility percentages."
+            if len(trend_summary) == 0:
+                st.info(
+                    f"Not enough test volume to show reliable trends for {t_org} × {t_ab} "
+                    f"under the current filters. Each period needs at least {MIN_VOLUME} tests. "
+                    "Try broadening your date range, switching to quarterly, or including more facilities."
                 )
             else:
-                latest_pct = trend_summary["pct_r"].iloc[-1]
-                latest_label = f"Latest {period_label} %R"
-                latest_help = f"Resistance rate for the most recent {period_label}."
+                if len(low_volume_periods) > 0:
+                    st.caption(
+                        f"{len(low_volume_periods)} period(s) hidden due to insufficient "
+                        f"test volume (n < {MIN_VOLUME})."
+                    )
 
-            col_x.metric("Overall %R", f"{overall_r:.1f}%")
-            col_y.metric("Total tests", f"{total_tested:,}")
-            col_z.metric(latest_label, f"{latest_pct:.1f}%", help=latest_help)
+                # --- Fix 1: rolling average smoothing ---
+                # In single-trace mode: smooth across the single chronological series.
+                # In compare mode: smooth within each facility's own time series so the
+                # rolling window doesn't mix facilities.
+                if compare:
+                    trend_summary["pct_r_smooth"] = (
+                        trend_summary.groupby("facility")["pct_r"]
+                        .rolling(window=2, min_periods=1).mean()
+                        .round(1).reset_index(level=0, drop=True)
+                    )
+                else:
+                    trend_summary["pct_r_smooth"] = (
+                        trend_summary["pct_r"]
+                        .rolling(window=2, min_periods=1).mean().round(1)
+                    )
 
-            with st.expander("Data table"):
-                show = trend_summary.copy()
-                # Explicit column rename — cleaner than blanket title-casing, which produced
-                # awkward labels like "N R" and "Pct R".
-                rename_map = {
-                    "period": "Period",
-                    "facility": "Facility",
-                    "n_tested": "n tested",
-                    "n_r": "n resistant",
-                    "pct_r": "%R",
-                }
-                show = show.rename(columns=rename_map)
-                st.dataframe(show, hide_index=True, use_container_width=True)
+                # --- Fix 2: Wilson confidence interval (single-trace mode only) ---
+                # In compare mode, overlapping CI bands would be unreadable, so we skip
+                # CI visualisation there and let the smoothed per-facility lines speak.
+                if not compare:
+                    ci_vals = trend_summary.apply(
+                        lambda row: pd.Series(
+                            wilson_confidence_interval(row["n_r"], row["n_tested"])
+                        ),
+                        axis=1,
+                    )
+                    trend_summary[["ci_low", "ci_high"]] = ci_vals
+
+                # --- Build the chart ---
+                fig = go.Figure()
+
+                if compare:
+                    # One smoothed line per facility, raw points as faint markers
+                    for fac, grp in trend_summary.groupby("facility"):
+                        fig.add_trace(go.Scatter(
+                            x=grp["period"], y=grp["pct_r_smooth"],
+                            mode="lines+markers", line=dict(width=2.5),
+                            name=fac,
+                            customdata=grp["n_tested"],
+                            hovertemplate=(f"<b>{fac}</b><br>%{{x}}<br>"
+                                            "Smoothed: %{y:.1f}%<br>"
+                                            "n=%{customdata}<extra></extra>"),
+                        ))
+                else:
+                    # Single-trace: confidence band, raw scatter, smoothed main line
+                    fig.add_trace(go.Scatter(
+                        x=trend_summary["period"].tolist() +
+                          trend_summary["period"].tolist()[::-1],
+                        y=trend_summary["ci_high"].tolist() +
+                          trend_summary["ci_low"].tolist()[::-1],
+                        fill="toself",
+                        fillcolor="rgba(99, 110, 250, 0.12)",
+                        line=dict(color="rgba(255,255,255,0)"),
+                        name="95% confidence band",
+                        showlegend=True, hoverinfo="skip",
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=trend_summary["period"], y=trend_summary["pct_r"],
+                        mode="markers",
+                        marker=dict(size=6, color="grey", opacity=0.5),
+                        name="Raw per-period rate",
+                        customdata=trend_summary["n_tested"],
+                        hovertemplate="Raw: %{y:.1f}% (n=%{customdata})<extra></extra>",
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=trend_summary["period"], y=trend_summary["pct_r_smooth"],
+                        mode="lines", line=dict(width=3, color="rgb(99, 110, 250)"),
+                        name=f"{t_ab} (smoothed)",
+                        hovertemplate="Smoothed: %{y:.1f}%<extra></extra>",
+                    ))
+
+                # --- Fix 3: 50% clinical threshold line ---
+                fig.add_hline(
+                    y=50, line_dash="dash", line_color="rgba(220, 50, 50, 0.6)",
+                    line_width=1.5,
+                    annotation_text="50% threshold",
+                    annotation_position="top right",
+                    annotation_font_size=11,
+                    annotation_font_color="rgba(220, 50, 50, 0.8)",
+                )
+
+                # --- Fix 4: latest period annotation (single-trace only to avoid clutter) ---
+                if not compare:
+                    latest_row = trend_summary.iloc[-1]
+                    fig.add_annotation(
+                        x=latest_row["period"],
+                        y=latest_row["pct_r_smooth"],
+                        text=f"  {latest_row['pct_r_smooth']:.1f}%",
+                        showarrow=False,
+                        font=dict(size=12, color="black"),
+                        xanchor="left",
+                    )
+
+                # --- Fix 6: x-axis rotation and spacing ---
+                fig.update_layout(
+                    xaxis_title="Month" if period == "Monthly" else "Quarter",
+                    yaxis_title=f"% Resistant to {t_ab}",
+                    yaxis_range=[0, 100], hovermode="x unified", height=480,
+                    title=f"{t_org} — {t_ab} resistance trend",
+                    xaxis_tickangle=-45,
+                    margin=dict(b=100, t=60, l=60, r=100),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # --- Summary metrics (Fix 8: trend direction) ---
+                overall_r = (t_data["interpretation"] == "R").mean() * 100
+                total_tested = len(t_data)
+                period_label = "month" if period == "Monthly" else "quarter"
+
+                # Latest-period %R — compute differently depending on compare mode
+                if compare:
+                    # Pool all facilities' tests in the latest period for a true weighted rate
+                    latest_period = trend_summary["period"].iloc[-1]
+                    latest_rows = trend_summary[trend_summary["period"] == latest_period]
+                    latest_pct = (latest_rows["n_r"].sum() / latest_rows["n_tested"].sum() * 100) \
+                                  if latest_rows["n_tested"].sum() > 0 else float("nan")
+                    latest_label = f"Latest {period_label} %R (pooled)"
+                    n_with_data = len(latest_rows)
+                    n_selected = len(chosen_facs)
+                    latest_help = (
+                        f"Pooled rate across {n_with_data} of {n_selected} selected facilities "
+                        f"for {latest_period} (sites with no tests in that period are excluded). "
+                        f"Weighted by test volume, not a simple average of facility percentages."
+                    )
+                else:
+                    latest_pct = trend_summary["pct_r"].iloc[-1]
+                    latest_label = f"Latest {period_label} %R"
+                    latest_help = f"Resistance rate for the most recent {period_label}."
+
+                # Trend direction — compare first half vs second half of the filtered series.
+                # Use raw pct_r (not smoothed) so real movement isn't dampened. In compare mode,
+                # aggregate across facilities per period first so we compare the pooled trend.
+                if compare:
+                    pooled = (trend_summary.groupby("period", sort=False)
+                              .apply(lambda g: (g["n_r"].sum() / g["n_tested"].sum() * 100),
+                                     include_groups=False)
+                              .reset_index(name="pct_r"))
+                    trend_series = pooled["pct_r"]
+                else:
+                    trend_series = trend_summary["pct_r"]
+
+                if len(trend_series) >= 3:
+                    first_half = trend_series.iloc[:len(trend_series) // 2].mean()
+                    second_half = trend_series.iloc[len(trend_series) // 2:].mean()
+                    diff = second_half - first_half
+                    if diff > 5:
+                        trend_direction = "↑ Rising"
+                    elif diff < -5:
+                        trend_direction = "↓ Falling"
+                    else:
+                        trend_direction = "→ Stable"
+                    trend_help = (f"Compares the first half of the visible period "
+                                   f"({first_half:.1f}%) to the second half "
+                                   f"({second_half:.1f}%). Rising / Falling is flagged at a "
+                                   f"±5 percentage point change.")
+                else:
+                    trend_direction = "Insufficient data"
+                    trend_help = "Need at least 3 periods to compute a trend direction."
+
+                col_x, col_y, col_z, col_w = st.columns(4)
+                col_x.metric("Overall %R", f"{overall_r:.1f}%")
+                col_y.metric("Total tests", f"{total_tested:,}")
+                col_z.metric(latest_label, f"{latest_pct:.1f}%", help=latest_help)
+                col_w.metric("Trend", trend_direction, help=trend_help)
+
+                with st.expander("Data table"):
+                    show = trend_summary.copy()
+                    # Explicit column rename — cleaner than blanket title-casing, which
+                    # produced awkward labels like "N R" and "Pct R".
+                    rename_map = {
+                        "period": "Period",
+                        "facility": "Facility",
+                        "n_tested": "n tested",
+                        "n_r": "n resistant",
+                        "pct_r": "%R",
+                        "pct_r_smooth": "%R (smoothed)",
+                        "ci_low": "95% CI low",
+                        "ci_high": "95% CI high",
+                    }
+                    # Drop any columns we don't want in the data table
+                    show = show.rename(columns=rename_map)
+                    st.dataframe(show, hide_index=True, use_container_width=True)
 
 # ---- Tab 5: Demographics ----
-with tab5:
+with tab5, tab_guard():
     st.subheader("Resistance by patient demographics")
     st.caption("See whether resistance rates differ by patient age or sex for a chosen "
                 "organism × antibiotic. Differences may reflect exposure patterns, "
@@ -776,36 +1033,47 @@ with tab5:
             age_sum["n"] = age_sum["n"].astype(int)
             age_sum["n_r"] = age_sum["n_r"].astype(int)
             age_sum["pct_r"] = (age_sum["n_r"] / age_sum["n"] * 100).round(1)
+            # Drop age groups with fewer than 5 tests — too small to show any rate at all
+            age_sum = age_sum[age_sum["n"] >= 5]
             age_sum["patient_age_group"] = pd.Categorical(
                 age_sum["patient_age_group"], categories=age_order, ordered=True
             )
             age_sum = age_sum.sort_values("patient_age_group")
+            age_sum["confidence"] = age_sum["n"].apply(
+                lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
+            )
 
-            fig = px.bar(age_sum, x="patient_age_group", y="pct_r", text="pct_r",
-                          color="pct_r", color_continuous_scale="RdYlGn_r",
-                          range_color=[0, 100], hover_data=["n"])
-            fig.update_traces(texttemplate="%{text}%", textposition="outside")
-            fig.update_layout(xaxis_title="Age group",
-                               yaxis_title=f"% Resistant to {d_ab}",
-                               yaxis_range=[0, 110], height=420,
-                               coloraxis_showscale=False)
-            st.plotly_chart(fig, use_container_width=True)
+            if len(age_sum) == 0:
+                st.info("Not enough tests per age group to display a breakdown for this "
+                        "combination under the current filter. Try broadening the selection.")
+            else:
+                fig = px.bar(age_sum, x="patient_age_group", y="pct_r", text="pct_r",
+                              color="pct_r", color_continuous_scale="RdYlGn_r",
+                              range_color=[0, 100], hover_data=["n", "confidence"])
+                fig.update_traces(texttemplate="%{text}%", textposition="outside")
+                fig.update_layout(xaxis_title="Age group",
+                                   yaxis_title=f"% Resistant to {d_ab}",
+                                   yaxis_range=[0, 110], height=420,
+                                   coloraxis_showscale=False)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # Sample size warning — flag any age group with low test volume
-            small_cells = age_sum[age_sum["n"] < 10]
-            if len(small_cells) > 0:
-                st.warning(
-                    f"⚠️ {len(small_cells)} age group(s) have fewer than 10 tests. "
-                    "Interpret those rates with caution."
-                )
+                # Sample size warning — flag any age group with low test volume
+                small_cells = age_sum[age_sum["n"] < 10]
+                if len(small_cells) > 0:
+                    st.warning(
+                        f"⚠️ {len(small_cells)} age group(s) have fewer than 10 tests "
+                        "(marked **Low** confidence). Interpret those rates with caution."
+                    )
 
-            with st.expander("Data table"):
-                show = age_sum[["patient_age_group", "n", "n_r", "pct_r"]].copy()
-                show.columns = ["Age group", "Isolates tested", "Resistant", "% Resistant"]
-                st.dataframe(show, hide_index=True, use_container_width=True)
+                with st.expander("Data table"):
+                    show = age_sum[["patient_age_group", "n", "n_r", "pct_r",
+                                     "confidence"]].copy()
+                    show.columns = ["Age group", "Isolates tested", "Resistant",
+                                     "% Resistant", "Confidence"]
+                    st.dataframe(show, hide_index=True, use_container_width=True)
 
 # ---- Tab 6: Geography ----
-with tab6:
+with tab6, tab_guard():
     st.subheader("Resistance by geography")
     marker = st.radio("Marker", ["MRSA", "ESBL", "Carbapenem-R (Enterobacterales)"],
                        horizontal=True)
@@ -843,12 +1111,15 @@ with tab6:
     st.plotly_chart(fig, use_container_width=True)
 
     disp = rates.copy()
+    disp["confidence"] = disp["n"].astype(int).apply(
+        lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
+    )
     disp["rate"] = disp["rate"].round(1).astype(str) + "%"
-    disp.columns = [level, marker, "n"]
+    disp.columns = [level, marker, "Isolates tested", "Confidence"]
     st.dataframe(disp, hide_index=True, use_container_width=True)
 
 # ---- Tab 7: Raw data ----
-with tab7:
+with tab7, tab_guard():
     view = st.radio("Table",
                      ["Isolates (one row per isolate)",
                       "AST results (long format — one row per antibiotic test)"],
