@@ -31,10 +31,13 @@ from datetime import datetime, timedelta
 st.set_page_config(
     page_title="Nigerian AMR Surveillance Dashboard",
     page_icon="🧫",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="expanded",
 )
-
+st.caption(
+    "For the best experience, view on a desktop or laptop browser. "
+    "Mobile optimisation is coming in the next version."
+)
 # ---------------------------------------------------------------------------
 # Reference registries
 # ---------------------------------------------------------------------------
