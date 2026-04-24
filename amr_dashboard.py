@@ -107,6 +107,51 @@ def _age_group(age: int) -> str:
     return "65+"
 
 
+def calculate_trend(ast_df: pd.DataFrame, organism: str, antibiotic: str,
+                    min_periods: int = 2) -> str:
+    """Compare resistance rate in the first vs second half of available quarters.
+
+    Returns a direction string. Requires at least 20 tests total and at least
+    min_periods quarters with n >= 10 to produce a meaningful result; otherwise
+    returns '— Insufficient data' rather than a misleading direction.
+    """
+    pair_df = ast_df[
+        (ast_df["organism"] == organism) &
+        (ast_df["antibiotic"] == antibiotic)
+    ].copy()
+
+    if len(pair_df) < 20:
+        return "— Insufficient data"
+
+    pair_df["period"] = pd.to_datetime(pair_df["collection_date"]).dt.to_period("Q").astype(str)
+    period_summary = (
+        pair_df.groupby("period")
+        .agg(n_tested=("interpretation", "count"),
+             n_r=("interpretation", lambda x: (x == "R").sum()))
+        .reset_index()
+    )
+    period_summary["n_tested"] = period_summary["n_tested"].astype(int)
+    period_summary["n_r"] = period_summary["n_r"].astype(int)
+    period_summary = period_summary[period_summary["n_tested"] >= 10].sort_values("period")
+
+    if len(period_summary) < min_periods:
+        return "— Insufficient data"
+
+    period_summary["pct_r"] = period_summary["n_r"] / period_summary["n_tested"] * 100
+
+    midpoint = len(period_summary) // 2
+    first_half = period_summary.iloc[:midpoint]["pct_r"].mean()
+    second_half = period_summary.iloc[midpoint:]["pct_r"].mean()
+    diff = second_half - first_half
+
+    if diff > 5:
+        return "↑ Rising"
+    elif diff < -5:
+        return "↓ Falling"
+    else:
+        return "→ Stable"
+
+
 def wilson_confidence_interval(n_r: int, n_tested: int, confidence: float = 0.95):
     """Wilson score interval for a proportion. Returns (lower, upper) on 0-100 scale.
 
@@ -573,30 +618,41 @@ with tab1, tab_guard():
             "resistance patterns."
         )
     else:
-        concerns["confidence"] = concerns["n_tested"].apply(
-            lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
+        # Trend direction — compares first-half vs second-half quarterly rates for each pair.
+        # Uses ast_f (the filtered AST table) so the trend reflects the current selection.
+        concerns["Trend"] = concerns.apply(
+            lambda row: calculate_trend(ast_f, row["organism"], row["antibiotic"]),
+            axis=1,
         )
-        if (concerns["n_tested"] < 10).any():
-            st.caption("⚠️ Some entries have fewer than 10 tests and are marked **Low** "
-                        "confidence. Interpret with caution.")
 
         concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
         fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
                       text="pct_r", color="pct_r", color_continuous_scale="Reds",
                       range_color=[0, 100], hover_data={"n_tested": True,
                                                          "antibiotic_class": True,
-                                                         "confidence": True,
+                                                         "Trend": True,
                                                          "label": False, "pct_r": False})
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
                            height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        show = concerns[["organism", "antibiotic", "antibiotic_class", "pct_r",
-                         "n_tested", "confidence"]].copy()
-        show.columns = ["Organism", "Antibiotic", "Class", "% Resistant",
-                        "Isolates tested", "Confidence"]
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        display_concerns = concerns[["organism", "antibiotic", "pct_r",
+                                      "n_tested", "Trend"]].copy()
+        display_concerns.columns = ["Organism", "Antibiotic", "% Resistant",
+                                     "Isolates tested", "Trend"]
+
+        def style_trend(val):
+            if "Rising" in str(val):
+                return "color: red; font-weight: bold"
+            elif "Falling" in str(val):
+                return "color: green; font-weight: bold"
+            elif "Stable" in str(val):
+                return "color: grey"
+            return ""
+
+        styled_concerns = display_concerns.style.map(style_trend, subset=["Trend"])
+        st.dataframe(styled_concerns, use_container_width=True, hide_index=True)
 
 # ---- Tab 2 ----
 with tab2, tab_guard():
