@@ -102,6 +102,19 @@ WARD_MULT = {
     "Obstetrics": 0.95, "Outpatient": 0.85,
 }
 
+ORGANISM_ABBREV = {
+    "Staphylococcus aureus":   "S. aureus",
+    "Escherichia coli":        "E. coli",
+    "Klebsiella pneumoniae":   "K. pneumoniae",
+    "Pseudomonas aeruginosa":  "P. aeruginosa",
+    "Acinetobacter baumannii": "A. baumannii",
+    "Enterococcus faecalis":   "E. faecalis",
+    "Streptococcus pneumoniae":"S. pneumoniae",
+    "Enterobacter cloacae":    "E. cloacae",
+    "Proteus mirabilis":       "P. mirabilis",
+    "Salmonella Typhi":        "S. Typhi",
+}
+
 # ---------------------------------------------------------------------------
 # Data generation — two linked tables
 # ---------------------------------------------------------------------------
@@ -458,6 +471,9 @@ iso_f = apply_filter(iso_f, "ward_type", ward_f)
 
 ast_f = ast_full[ast_full["isolate_id"].isin(iso_f["isolate_id"])]
 
+iso_f["organism_display"] = iso_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+
 st.sidebar.markdown("---")
 st.sidebar.metric("Isolates in selection", f"{len(iso_f):,}")
 st.sidebar.metric("AST results", f"{len(ast_f):,}")
@@ -532,6 +548,9 @@ with tab1, tab_guard():
     if quick_facility != "All facilities":
         iso_overview = iso_overview[iso_overview["facility"] == quick_facility]
         ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
+
+    iso_overview["organism_display"] = iso_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+    ast_overview["organism_display"] = ast_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 
     # Guard: if the quick filter conflicts with the sidebar filter (e.g. sidebar has 2024
     # but user picks 2023 in the quick filter), the intersection is empty. Show a clear
@@ -663,7 +682,10 @@ with tab1, tab_guard():
                 "resistance patterns."
             )
         else:
-            concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
+            concerns["organism_display"] = concerns["organism"].map(
+                lambda x: ORGANISM_ABBREV.get(x, x)
+            )
+            concerns["label"] = concerns["organism_display"] + " / " + concerns["antibiotic"]
             fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
                           text="pct_r", color="pct_r", color_continuous_scale="Reds",
                           range_color=[0, 100], hover_data={"n_tested": True,
@@ -695,14 +717,15 @@ with tab2, tab_guard():
         oc = iso_f["organism"].value_counts().reset_index()
         oc.columns = ["organism", "count"]
         oc["pct"] = (oc["count"] / oc["count"].sum() * 100).round(1)
-        fig = px.bar(oc, x="count", y="organism", orientation="h", text="pct")
+        oc["organism_display"] = oc["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+        fig = px.bar(oc, x="count", y="organism_display", orientation="h", text="pct")
         fig.update_traces(texttemplate="%{text}%", textposition="outside")
         fig.update_layout(xaxis_title="Isolates", yaxis_title="", height=500,
                            yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig, use_container_width=True)
     with c2:
         st.subheader("Counts")
-        st.dataframe(oc, hide_index=True, use_container_width=True)
+        st.dataframe(oc[["organism", "count", "pct"]], hide_index=True, use_container_width=True)
 
     st.markdown("---")
     st.subheader("Organism × specimen heatmap")
@@ -717,13 +740,16 @@ with tab2, tab_guard():
     iso_heatmap["specimen_type"] = iso_heatmap["specimen_type"].map(
         lambda x: specimen_abbrev.get(x, x)
     )
-    piv = pd.crosstab(iso_heatmap["organism"], iso_heatmap["specimen_type"])
+    iso_heatmap["organism_display"] = iso_heatmap["organism"].map(
+        lambda x: ORGANISM_ABBREV.get(x, x)
+    )
+    piv = pd.crosstab(iso_heatmap["organism_display"], iso_heatmap["specimen_type"])
     fig = px.imshow(piv, aspect="auto", color_continuous_scale="OrRd",
                      labels={"color": "Count"})
     fig.update_layout(
         xaxis=dict(tickangle=-30, tickfont=dict(size=10), title=""),
         yaxis=dict(tickfont=dict(size=10), title=""),
-        margin=dict(l=140, r=20, t=20, b=60),
+        margin=dict(l=100, r=20, t=20, b=60),
         height=340,
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -775,7 +801,7 @@ with tab3, tab_guard():
                                    xaxis_range=[0, 110], coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
-                st.markdown(f"**{sel}** — {oa['isolate_id'].nunique():,} isolates")
+                st.markdown(f"**{ORGANISM_ABBREV.get(sel, sel)}** — {oa['isolate_id'].nunique():,} isolates")
                 disp = summary[["antibiotic", "antibiotic_class", "pct_r",
                                  "n_tested", "confidence"]].copy()
                 disp.columns = ["Antibiotic", "Class", "% Resistant",
@@ -1012,6 +1038,7 @@ with tab4, tab_guard():
                     )
 
                 # --- Fix 6: x-axis rotation and spacing ---
+                display_org = ORGANISM_ABBREV.get(t_org, t_org)
                 fig.update_layout(
                     xaxis=dict(
                         tickangle=-45,
@@ -1023,7 +1050,7 @@ with tab4, tab_guard():
                     hovermode="x unified",
                     height=300,
                     title=dict(
-                        text=f"{t_org} × {t_ab}",
+                        text=f"{display_org} × {t_ab}",
                         font=dict(size=13),
                         x=0,
                         xanchor="left",
