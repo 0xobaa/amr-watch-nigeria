@@ -31,9 +31,15 @@ from datetime import datetime, timedelta
 st.set_page_config(
     page_title="Nigerian AMR Surveillance Dashboard",
     page_icon="🧫",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded",
 )
+st.set_page_config(
+    page_title="AMR Watch Nigeria",
+    page_icon="🧫",
+    layout="centered"
+)
+
 st.caption(
     "For the best experience, view on a desktop or laptop browser. "
     "Mobile optimisation is coming in the next version."
@@ -469,33 +475,6 @@ if len(iso_f) == 0:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# KPI row
-# ---------------------------------------------------------------------------
-c1, c2, c3, c4, c5 = st.columns(5)
-
-sa = iso_f[iso_f["organism"] == "Staphylococcus aureus"]
-mrsa_rate = (sa["MRSA_status"] == "MRSA").mean() * 100 if len(sa) else np.nan
-
-# ESBL denominator: only Enterobacterales that have an ESBL result. Requiring organism
-# membership explicitly (rather than relying on ESBL_status != 'N/A') keeps this robust if
-# we later add Enterobacterales species that don't have ESBL testing configured.
-entero = iso_f[iso_f["organism"].isin(ENTEROBACTERALES)
-                & iso_f["ESBL_status"].isin(["Positive", "Negative"])]
-esbl_rate = (entero["ESBL_status"] == "Positive").mean() * 100 if len(entero) else np.nan
-
-carb_e = iso_f[iso_f["organism"].isin(ENTEROBACTERALES)
-                & iso_f["carbapenem_resistant"].isin(["Yes", "No"])]
-carb_rate = (carb_e["carbapenem_resistant"] == "Yes").mean() * 100 if len(carb_e) else np.nan
-
-c1.metric("Total isolates", f"{len(iso_f):,}")
-c2.metric("Unique patients", f"{iso_f['patient_id'].nunique():,}")
-c3.metric("MRSA prevalence", f"{mrsa_rate:.1f}%" if not np.isnan(mrsa_rate) else "—")
-c4.metric("ESBL prevalence", f"{esbl_rate:.1f}%" if not np.isnan(esbl_rate) else "—")
-c5.metric("Carbapenem-R (Entero.)", f"{carb_rate:.1f}%" if not np.isnan(carb_rate) else "—")
-
-st.markdown("---")
-
-# ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
@@ -522,117 +501,182 @@ def tab_guard():
 
 # ---- Tab 1: Overview — focused "what should I worry about?" view ----
 with tab1, tab_guard():
-    st.subheader("Resistance markers over time")
-    st.caption("Tracks the three headline resistance markers across quarters for the "
-                "current filter selection.")
 
-    t = iso_f.copy()
-    t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
+    # --- Quick filters (visible on mobile without opening the sidebar) ---
+    st.caption("Quick filters — visible on all screen sizes")
+    qf_col1, qf_col2 = st.columns(2)
+    with qf_col1:
+        quick_year = st.selectbox(
+            "Year",
+            options=["All"] + sorted(isolates_df["year"].unique().tolist(), reverse=True),
+            key="quick_year",
+        )
+    with qf_col2:
+        quick_facility = st.selectbox(
+            "Facility",
+            options=["All facilities"] + sorted(isolates_df["facility"].unique().tolist()),
+            key="quick_facility",
+        )
+    st.divider()
+    st.caption("For specimen type, ward, and zone filters — tap the menu icon at the top left.")
 
-    # Include n per period so we can hide low-volume periods where the rate would be
-    # driven by 2-3 isolates rather than real signal.
-    MIN_PERIOD_N = 20
+    # Apply quick filters on top of the sidebar filters. Both default to "All" so by
+    # default iso_overview == iso_f. When a quick filter is set, it narrows further.
+    iso_overview = iso_f.copy()
+    ast_overview = ast_f.copy()
 
-    sa_t = t[t["organism"] == "Staphylococcus aureus"].groupby("period").apply(
-        lambda g: pd.Series({
-            "MRSA %": (g["MRSA_status"] == "MRSA").mean() * 100,
-            "n": len(g),
-        }),
-        include_groups=False,
-    ).reset_index()
-    sa_t = sa_t[sa_t["n"] >= MIN_PERIOD_N]
+    if quick_year != "All":
+        iso_overview = iso_overview[iso_overview["year"] == int(quick_year)]
+        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
 
-    esbl_t = t[t["organism"].isin(ENTEROBACTERALES)
-                & t["ESBL_status"].isin(["Positive", "Negative"])].groupby("period").apply(
-        lambda g: pd.Series({
-            "ESBL %": (g["ESBL_status"] == "Positive").mean() * 100,
-            "n": len(g),
-        }),
-        include_groups=False,
-    ).reset_index()
-    esbl_t = esbl_t[esbl_t["n"] >= MIN_PERIOD_N]
+    if quick_facility != "All facilities":
+        iso_overview = iso_overview[iso_overview["facility"] == quick_facility]
+        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
 
-    carb_t = t[t["carbapenem_resistant"].isin(["Yes", "No"])
-                & t["organism"].isin(ENTEROBACTERALES)].groupby("period").apply(
-        lambda g: pd.Series({
-            "Carbapenem-R %": (g["carbapenem_resistant"] == "Yes").mean() * 100,
-            "n": len(g),
-        }),
-        include_groups=False,
-    ).reset_index()
-    carb_t = carb_t[carb_t["n"] >= MIN_PERIOD_N]
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=sa_t["period"], y=sa_t["MRSA %"],
-                              mode="lines+markers", name="MRSA",
-                              customdata=sa_t["n"],
-                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>MRSA</extra>"))
-    fig.add_trace(go.Scatter(x=esbl_t["period"], y=esbl_t["ESBL %"],
-                              mode="lines+markers", name="ESBL",
-                              customdata=esbl_t["n"],
-                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>ESBL</extra>"))
-    fig.add_trace(go.Scatter(x=carb_t["period"], y=carb_t["Carbapenem-R %"],
-                              mode="lines+markers", name="Carbapenem-R",
-                              customdata=carb_t["n"],
-                              hovertemplate="%{y:.1f}% (n=%{customdata})<extra>Carbapenem-R</extra>"))
-    fig.update_layout(xaxis_title="Quarter", yaxis_title="% resistant",
-                       hovermode="x unified", height=440, yaxis_range=[0, 100])
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption(f"Periods with fewer than {MIN_PERIOD_N} isolates are hidden to avoid noise.")
-
-    st.markdown("---")
-    st.subheader("Top resistance concerns")
-    st.caption("The five highest-resistance organism × antibiotic pairs in the current "
-                "selection. Use this as a quick 'what to watch' list.")
-
-    # Rank all organism × antibiotic pairs by %R. The threshold is 5 (rather than the
-    # earlier 30) so that tight filter combinations still produce a useful panel; rows
-    # with n < 10 are flagged as Low confidence so clinicians know to interpret cautiously.
-    MIN_TESTS = 5
-    concerns = (ast_f.groupby(["organism", "antibiotic", "antibiotic_class"])
-                 .agg(n_tested=("interpretation", "count"),
-                      n_r=("interpretation", lambda x: (x == "R").sum()))
-                 .reset_index())
-    # Cast to plain int to avoid PyArrow-backed dtype division errors on newer pandas
-    concerns["n_tested"] = concerns["n_tested"].astype(int)
-    concerns["n_r"] = concerns["n_r"].astype(int)
-    concerns["pct_r"] = (concerns["n_r"] / concerns["n_tested"] * 100).round(1)
-
-    # Exclude combinations with well-known intrinsic / near-universal resistance that
-    # aren't clinically actionable — e.g. ampicillin in Gram-negatives is essentially
-    # always resistant by nature, so clinicians don't use it empirically. Surfacing it
-    # as a "top concern" adds noise to the signal.
-    INTRINSIC_R_GRAM_NEG = ["Escherichia coli", "Klebsiella pneumoniae",
-                             "Proteus mirabilis", "Enterobacter cloacae",
-                             "Salmonella Typhi", "Pseudomonas aeruginosa",
-                             "Acinetobacter baumannii"]
-    mask_intrinsic = ((concerns["organism"].isin(INTRINSIC_R_GRAM_NEG))
-                       & (concerns["antibiotic"] == "Ampicillin"))
-    concerns = concerns[~mask_intrinsic]
-
-    concerns = concerns[concerns["n_tested"] >= MIN_TESTS].sort_values("pct_r", ascending=False).head(5)
-
-    if len(concerns) == 0:
+    # Guard: if the quick filter conflicts with the sidebar filter (e.g. sidebar has 2024
+    # but user picks 2023 in the quick filter), the intersection is empty. Show a clear
+    # message rather than a blank page.
+    if len(iso_overview) == 0:
         st.info(
-            "Limited data in the current filter combination to rank resistance concerns. "
-            "Broaden filters (wider date range or more facilities) to see facility-wide "
-            "resistance patterns."
+            "The quick filter selection conflicts with the sidebar filters — no isolates "
+            "match the combination. Try changing the Year or Facility above, or clear "
+            "the sidebar filters."
         )
     else:
-        concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
-        fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
-                      text="pct_r", color="pct_r", color_continuous_scale="Reds",
-                      range_color=[0, 100], hover_data={"n_tested": True,
-                                                         "antibiotic_class": True,
-                                                         "label": False, "pct_r": False})
-        fig.update_traces(texttemplate="%{text}%", textposition="outside")
-        fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
-                           height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
-        st.plotly_chart(fig, use_container_width=True)
+        # --- KPI cards (use iso_overview so they respond to quick filters) ---
+        c1, c2, c3, c4, c5 = st.columns(5)
 
-        display_concerns = concerns[["organism", "antibiotic", "pct_r", "n_tested"]].copy()
-        display_concerns.columns = ["Organism", "Antibiotic", "% Resistant", "Isolates tested"]
-        st.dataframe(display_concerns, use_container_width=True, hide_index=True)
+        sa = iso_overview[iso_overview["organism"] == "Staphylococcus aureus"]
+        mrsa_rate = (sa["MRSA_status"] == "MRSA").mean() * 100 if len(sa) else np.nan
+
+        entero = iso_overview[iso_overview["organism"].isin(ENTEROBACTERALES)
+                               & iso_overview["ESBL_status"].isin(["Positive", "Negative"])]
+        esbl_rate = (entero["ESBL_status"] == "Positive").mean() * 100 if len(entero) else np.nan
+
+        carb_e = iso_overview[iso_overview["organism"].isin(ENTEROBACTERALES)
+                               & iso_overview["carbapenem_resistant"].isin(["Yes", "No"])]
+        carb_rate = (carb_e["carbapenem_resistant"] == "Yes").mean() * 100 if len(carb_e) else np.nan
+
+        c1.metric("Total isolates", f"{len(iso_overview):,}")
+        c2.metric("Unique patients", f"{iso_overview['patient_id'].nunique():,}")
+        c3.metric("MRSA prevalence", f"{mrsa_rate:.1f}%" if not np.isnan(mrsa_rate) else "—")
+        c4.metric("ESBL prevalence", f"{esbl_rate:.1f}%" if not np.isnan(esbl_rate) else "—")
+        c5.metric("Carbapenem-R (Entero.)", f"{carb_rate:.1f}%" if not np.isnan(carb_rate) else "—")
+
+        st.markdown("---")
+
+        # --- Resistance markers over time ---
+        st.subheader("Resistance markers over time")
+        st.caption("Tracks the three headline resistance markers across quarters for the "
+                    "current filter selection.")
+
+        t = iso_overview.copy()
+        t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
+
+        # Include n per period so we can hide low-volume periods where the rate would be
+        # driven by 2-3 isolates rather than real signal.
+        MIN_PERIOD_N = 20
+
+        sa_t = t[t["organism"] == "Staphylococcus aureus"].groupby("period").apply(
+            lambda g: pd.Series({
+                "MRSA %": (g["MRSA_status"] == "MRSA").mean() * 100,
+                "n": len(g),
+            }),
+            include_groups=False,
+        ).reset_index()
+        sa_t = sa_t[sa_t["n"] >= MIN_PERIOD_N]
+
+        esbl_t = t[t["organism"].isin(ENTEROBACTERALES)
+                    & t["ESBL_status"].isin(["Positive", "Negative"])].groupby("period").apply(
+            lambda g: pd.Series({
+                "ESBL %": (g["ESBL_status"] == "Positive").mean() * 100,
+                "n": len(g),
+            }),
+            include_groups=False,
+        ).reset_index()
+        esbl_t = esbl_t[esbl_t["n"] >= MIN_PERIOD_N]
+
+        carb_t = t[t["carbapenem_resistant"].isin(["Yes", "No"])
+                    & t["organism"].isin(ENTEROBACTERALES)].groupby("period").apply(
+            lambda g: pd.Series({
+                "Carbapenem-R %": (g["carbapenem_resistant"] == "Yes").mean() * 100,
+                "n": len(g),
+            }),
+            include_groups=False,
+        ).reset_index()
+        carb_t = carb_t[carb_t["n"] >= MIN_PERIOD_N]
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=sa_t["period"], y=sa_t["MRSA %"],
+                                  mode="lines+markers", name="MRSA",
+                                  customdata=sa_t["n"],
+                                  hovertemplate="%{y:.1f}% (n=%{customdata})<extra>MRSA</extra>"))
+        fig.add_trace(go.Scatter(x=esbl_t["period"], y=esbl_t["ESBL %"],
+                                  mode="lines+markers", name="ESBL",
+                                  customdata=esbl_t["n"],
+                                  hovertemplate="%{y:.1f}% (n=%{customdata})<extra>ESBL</extra>"))
+        fig.add_trace(go.Scatter(x=carb_t["period"], y=carb_t["Carbapenem-R %"],
+                                  mode="lines+markers", name="Carbapenem-R",
+                                  customdata=carb_t["n"],
+                                  hovertemplate="%{y:.1f}% (n=%{customdata})<extra>Carbapenem-R</extra>"))
+        fig.update_layout(xaxis_title="Quarter", yaxis_title="% resistant",
+                           hovermode="x unified", height=440, yaxis_range=[0, 100])
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(f"Periods with fewer than {MIN_PERIOD_N} isolates are hidden to avoid noise.")
+
+        st.markdown("---")
+        st.subheader("Top resistance concerns")
+        st.caption("The five highest-resistance organism × antibiotic pairs in the current "
+                    "selection. Use this as a quick 'what to watch' list.")
+
+        # Rank all organism × antibiotic pairs by %R. The threshold is 5 (rather than the
+        # earlier 30) so that tight filter combinations still produce a useful panel; rows
+        # with n < 10 are flagged as Low confidence so clinicians know to interpret cautiously.
+        MIN_TESTS = 5
+        concerns = (ast_overview.groupby(["organism", "antibiotic", "antibiotic_class"])
+                     .agg(n_tested=("interpretation", "count"),
+                          n_r=("interpretation", lambda x: (x == "R").sum()))
+                     .reset_index())
+        # Cast to plain int to avoid PyArrow-backed dtype division errors on newer pandas
+        concerns["n_tested"] = concerns["n_tested"].astype(int)
+        concerns["n_r"] = concerns["n_r"].astype(int)
+        concerns["pct_r"] = (concerns["n_r"] / concerns["n_tested"] * 100).round(1)
+
+        # Exclude combinations with well-known intrinsic / near-universal resistance that
+        # aren't clinically actionable — e.g. ampicillin in Gram-negatives is essentially
+        # always resistant by nature, so clinicians don't use it empirically. Surfacing it
+        # as a "top concern" adds noise to the signal.
+        INTRINSIC_R_GRAM_NEG = ["Escherichia coli", "Klebsiella pneumoniae",
+                                 "Proteus mirabilis", "Enterobacter cloacae",
+                                 "Salmonella Typhi", "Pseudomonas aeruginosa",
+                                 "Acinetobacter baumannii"]
+        mask_intrinsic = ((concerns["organism"].isin(INTRINSIC_R_GRAM_NEG))
+                           & (concerns["antibiotic"] == "Ampicillin"))
+        concerns = concerns[~mask_intrinsic]
+
+        concerns = concerns[concerns["n_tested"] >= MIN_TESTS].sort_values("pct_r", ascending=False).head(5)
+
+        if len(concerns) == 0:
+            st.info(
+                "Limited data in the current filter combination to rank resistance concerns. "
+                "Broaden filters (wider date range or more facilities) to see facility-wide "
+                "resistance patterns."
+            )
+        else:
+            concerns["label"] = concerns["organism"] + " — " + concerns["antibiotic"]
+            fig = px.bar(concerns.sort_values("pct_r"), x="pct_r", y="label", orientation="h",
+                          text="pct_r", color="pct_r", color_continuous_scale="Reds",
+                          range_color=[0, 100], hover_data={"n_tested": True,
+                                                             "antibiotic_class": True,
+                                                             "label": False, "pct_r": False})
+            fig.update_traces(texttemplate="%{text}%", textposition="outside")
+            fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
+                               height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+            display_concerns = concerns[["organism", "antibiotic", "pct_r", "n_tested"]].copy()
+            display_concerns.columns = ["Organism", "Antibiotic", "% Resistant", "Isolates tested"]
+            st.dataframe(display_concerns, use_container_width=True, hide_index=True)
 
 # ---- Tab 2 ----
 with tab2, tab_guard():
