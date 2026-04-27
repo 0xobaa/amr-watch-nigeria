@@ -669,9 +669,18 @@ with tab1, tab_guard():
                           range_color=[0, 100], hover_data={"n_tested": True,
                                                              "antibiotic_class": True,
                                                              "label": False, "pct_r": False})
-            fig.update_traces(texttemplate="%{text}%", textposition="outside")
-            fig.update_layout(xaxis_title="% Resistant", yaxis_title="",
-                               height=360, xaxis_range=[0, 110], coloraxis_showscale=False)
+            fig.update_traces(
+                texttemplate="%{text:.1f}%",
+                textposition="inside",
+                textfont=dict(size=11, color="white"),
+            )
+            fig.update_layout(
+                margin=dict(l=10, r=10, t=10, b=10),
+                height=220,
+                xaxis=dict(showticklabels=False, title=""),
+                yaxis=dict(tickfont=dict(size=11), title=""),
+                coloraxis_showscale=False,
+            )
             st.plotly_chart(fig, use_container_width=True)
 
             display_concerns = concerns[["organism", "antibiotic", "pct_r", "n_tested"]].copy()
@@ -697,10 +706,26 @@ with tab2, tab_guard():
 
     st.markdown("---")
     st.subheader("Organism × specimen heatmap")
-    piv = pd.crosstab(iso_f["organism"], iso_f["specimen_type"])
+
+    # Abbreviate specimen names so x-axis labels stay readable on narrow screens
+    specimen_abbrev = {
+        "Blood": "Blood", "Urine": "Urine", "Wound swab": "Wound",
+        "CSF": "CSF", "Sputum": "Sputum", "High vaginal": "HVS",
+        "Pus": "Pus", "Stool": "Stool",
+    }
+    iso_heatmap = iso_f.copy()
+    iso_heatmap["specimen_type"] = iso_heatmap["specimen_type"].map(
+        lambda x: specimen_abbrev.get(x, x)
+    )
+    piv = pd.crosstab(iso_heatmap["organism"], iso_heatmap["specimen_type"])
     fig = px.imshow(piv, aspect="auto", color_continuous_scale="OrRd",
                      labels={"color": "Count"})
-    fig.update_layout(height=500)
+    fig.update_layout(
+        xaxis=dict(tickangle=-30, tickfont=dict(size=10), title=""),
+        yaxis=dict(tickfont=dict(size=10), title=""),
+        margin=dict(l=140, r=20, t=20, b=60),
+        height=340,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # ---- Tab 3: Antibiograms — the big win of long format ----
@@ -988,12 +1013,29 @@ with tab4, tab_guard():
 
                 # --- Fix 6: x-axis rotation and spacing ---
                 fig.update_layout(
-                    xaxis_title="Month" if period == "Monthly" else "Quarter",
+                    xaxis=dict(
+                        tickangle=-45,
+                        tickfont=dict(size=9),
+                        title="",
+                    ),
                     yaxis_title=f"% Resistant to {t_ab}",
-                    yaxis_range=[0, 100], hovermode="x unified", height=480,
-                    title=f"{t_org} — {t_ab} resistance trend",
-                    xaxis_tickangle=-45,
-                    margin=dict(b=100, t=60, l=60, r=100),
+                    yaxis_range=[0, 100],
+                    hovermode="x unified",
+                    height=300,
+                    title=dict(
+                        text=f"{t_org} × {t_ab}",
+                        font=dict(size=13),
+                        x=0,
+                        xanchor="left",
+                    ),
+                    margin=dict(l=50, r=15, t=40, b=80),
+                    legend=dict(
+                        font=dict(size=9),
+                        orientation="v",
+                        x=1.0, xanchor="right",
+                        y=1.0, yanchor="top",
+                        bgcolor="rgba(0,0,0,0)",
+                    ),
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
