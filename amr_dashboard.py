@@ -34,6 +34,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 st.set_page_config(
     page_title="AMR Watch Nigeria",
     page_icon="🧫",
@@ -64,22 +65,23 @@ FACILITIES = {
 }
 
 ORGANISMS = {
-    # Existing 10 organisms — weights scaled by 0.95 (was 1.0) to make room
-    # for the three new organisms below. New total still sums to 1.0.
-    "Escherichia coli":          0.2375,   # was 0.25
-    "Klebsiella pneumoniae":     0.19,     # was 0.20
-    "Staphylococcus aureus":     0.171,    # was 0.18
-    "Pseudomonas aeruginosa":    0.095,    # was 0.10
-    "Acinetobacter baumannii":   0.0665,   # was 0.07
-    "Enterococcus faecalis":     0.057,    # was 0.06
-    "Salmonella Typhi":          0.0475,   # was 0.05
-    "Streptococcus pneumoniae":  0.038,    # was 0.04
-    "Proteus mirabilis":         0.0285,   # was 0.03
-    "Enterobacter cloacae":      0.019,    # was 0.02
-    # New organisms — primarily HVS-relevant. Candida has no AST panel.
+    # Weights scaled slightly to accommodate N. meningitidis. Total sums to 1.0.
+    "Escherichia coli":          0.2329,
+    "Klebsiella pneumoniae":     0.1875,
+    "Staphylococcus aureus":     0.169,
+    "Pseudomonas aeruginosa":    0.0937,
+    "Acinetobacter baumannii":   0.0656,
+    "Enterococcus faecalis":     0.0562,
+    "Salmonella Typhi":          0.0468,
+    "Streptococcus pneumoniae":  0.0375,
+    "Proteus mirabilis":         0.0281,
+    "Enterobacter cloacae":      0.0187,
+    # HVS-relevant organisms. Candida has no AST panel.
     "Gardnerella vaginalis":     0.02,
     "Neisseria gonorrhoeae":     0.015,
     "Candida species":           0.015,
+    # CSF / meningitis — primarily relevant to CSF specimens
+    "Neisseria meningitidis":    0.014,
 }
 
 SPECIMENS = {
@@ -214,11 +216,14 @@ SPECIMEN_ORGANISM_WEIGHTS = {
         ("Acinetobacter baumannii",   0.06),
     ],
     "CSF": [
-        ("Streptococcus pneumoniae",  0.45),
-        ("Klebsiella pneumoniae",     0.22),
-        ("Escherichia coli",          0.18),
-        ("Staphylococcus aureus",     0.10),
-        ("Enterobacter cloacae",      0.05),
+        # S. pneumoniae dominant nationally; N. meningitidis more prominent
+        # in the meningitis belt (North Central / North West zones).
+        # These weights reflect a national average across all 12 sentinel sites.
+        ("Streptococcus pneumoniae",  0.40),
+        ("Neisseria meningitidis",    0.25),
+        ("Klebsiella pneumoniae",     0.16),
+        ("Escherichia coli",          0.12),
+        ("Staphylococcus aureus",     0.07),
     ],
     "Stool": [
         ("Salmonella Typhi",          0.60),
@@ -266,6 +271,7 @@ ORGANISM_ABBREV = {
     "Gardnerella vaginalis":   "G. vaginalis",
     "Neisseria gonorrhoeae":   "N. gonorrhoeae",
     "Candida species":         "Candida spp.",
+    "Neisseria meningitidis":  "N. meningitidis",
 }
 
 # ---------------------------------------------------------------------------
@@ -448,6 +454,17 @@ def _generate_ast_panel(org, context_mult, rng):
         add("Clindamycin",        "Lincosamides",       draw(0.20))
         add("Ampicillin",          "Penicillins",       draw(0.25))
         add("Amoxicillin-Clav",   "Beta-lactam/BLI",    draw(0.15))
+
+    elif org == "Neisseria meningitidis":
+        # Ceftriaxone remains the drug of choice — resistance still very low in Nigeria.
+        # Penicillin resistance rising but still below fluoroquinolone rates.
+        # Chloramphenicol included — still used in resource-limited settings.
+        add("Ceftriaxone",        "Cephalosporins",     draw(0.05))
+        add("Penicillin",         "Penicillins",        draw(0.20))
+        add("Ciprofloxacin",      "Fluoroquinolones",   draw(0.15))
+        add("Chloramphenicol",    "Amphenicols",        draw(0.25))
+        add("Rifampicin",         "Rifamycins",         draw(0.05))
+        add("Azithromycin",       "Macrolides",         draw(0.10))
 
     # Candida species — no AST panel. Antifungal susceptibility is a separate workflow
     # and isn't in scope for this dataset. Falls through to `return P` with an empty list.
@@ -726,6 +743,11 @@ ast_f = ast_full[ast_full["isolate_id"].isin(iso_f["isolate_id"])]
 iso_f["organism_display"] = iso_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 
+# Dynamic default organism — the most prevalent in the current filtered selection.
+# Used as the default selectbox value in Tabs 3, 4, and 5 so the first thing a
+# user sees reflects the context they filtered for, not a hardcoded organism.
+default_org = iso_f["organism"].value_counts().idxmax() if len(iso_f) > 0 else "Escherichia coli"
+
 if len(iso_f) == 0:
     st.info(
         "No isolates match the current filter combination. "
@@ -966,7 +988,7 @@ with tab3, tab_guard():
     if not orgs:
         st.info("No AST data for current filter.")
     else:
-        default_i = orgs.index("Escherichia coli") if "Escherichia coli" in orgs else 0
+        default_i = orgs.index(default_org) if default_org in orgs else 0
         sel = st.selectbox("Organism", orgs, index=default_i)
 
         oa = ast_f[ast_f["organism"] == sel]
@@ -1044,8 +1066,8 @@ with tab4, tab_guard():
         col_a, col_b, col_c = st.columns(3)
         with col_a:
             t_org = st.selectbox("Organism", trend_orgs,
-                                  index=trend_orgs.index("Klebsiella pneumoniae")
-                                  if "Klebsiella pneumoniae" in trend_orgs else 0,
+                                  index=trend_orgs.index(default_org)
+                                  if default_org in trend_orgs else 0,
                                   key="trend_org")
 
         # Antibiotics dynamically tied to the selected organism
@@ -1365,8 +1387,8 @@ with tab5, tab_guard():
         col_a, col_b = st.columns(2)
         with col_a:
             d_org = st.selectbox("Organism", demo_orgs,
-                                  index=demo_orgs.index("Escherichia coli")
-                                  if "Escherichia coli" in demo_orgs else 0,
+                                  index=demo_orgs.index(default_org)
+                                  if default_org in demo_orgs else 0,
                                   key="demo_org")
         org_abs = sorted(ast_f[ast_f["organism"] == d_org]["antibiotic"].unique())
         with col_b:
@@ -1522,6 +1544,8 @@ st.caption(
     "(MRSA ~80%, ESBL 60–80%, carbapenem-R 20–30%). Public tertiary facilities only. "
     "Do not use for clinical or policy decisions."
 )
+
+
 
 
 
