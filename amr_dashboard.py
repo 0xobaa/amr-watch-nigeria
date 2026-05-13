@@ -64,16 +64,22 @@ FACILITIES = {
 }
 
 ORGANISMS = {
-    "Escherichia coli":          0.25,
-    "Klebsiella pneumoniae":     0.20,
-    "Staphylococcus aureus":     0.18,
-    "Pseudomonas aeruginosa":    0.10,
-    "Acinetobacter baumannii":   0.07,
-    "Enterococcus faecalis":     0.06,
-    "Salmonella Typhi":          0.05,
-    "Streptococcus pneumoniae":  0.04,
-    "Proteus mirabilis":         0.03,
-    "Enterobacter cloacae":      0.02,
+    # Existing 10 organisms — weights scaled by 0.95 (was 1.0) to make room
+    # for the three new organisms below. New total still sums to 1.0.
+    "Escherichia coli":          0.2375,   # was 0.25
+    "Klebsiella pneumoniae":     0.19,     # was 0.20
+    "Staphylococcus aureus":     0.171,    # was 0.18
+    "Pseudomonas aeruginosa":    0.095,    # was 0.10
+    "Acinetobacter baumannii":   0.0665,   # was 0.07
+    "Enterococcus faecalis":     0.057,    # was 0.06
+    "Salmonella Typhi":          0.0475,   # was 0.05
+    "Streptococcus pneumoniae":  0.038,    # was 0.04
+    "Proteus mirabilis":         0.0285,   # was 0.03
+    "Enterobacter cloacae":      0.019,    # was 0.02
+    # New organisms — primarily HVS-relevant. Candida has no AST panel.
+    "Gardnerella vaginalis":     0.02,
+    "Neisseria gonorrhoeae":     0.015,
+    "Candida species":           0.015,
 }
 
 SPECIMENS = {
@@ -84,6 +90,150 @@ SPECIMENS = {
 WARDS = {
     "Medical ward": 0.22, "Surgical ward": 0.18, "ICU": 0.14, "Paediatrics": 0.13,
     "A&E": 0.12, "Obstetrics": 0.09, "Outpatient": 0.08, "Burns unit": 0.04,
+}
+
+CLINICAL_INDICATIONS = [
+    "Suspected UTI",
+    "Suspected pneumonia",
+    "Suspected sepsis / bloodstream infection",
+    "Suspected surgical site infection",
+    "Suspected wound infection (non-surgical)",
+    "Suspected skin and soft tissue infection",
+    "Suspected abscess",
+    "Suspected meningitis",
+    "Suspected enteric fever",
+    "Suspected gastroenteritis",
+    "Suspected vaginal infection",
+    "Suspected STI / PID",
+    "Other / not specified",
+]
+
+# Conditional distribution of clinical indication given specimen type. Each list of
+# (indication, weight) tuples must sum to 1.0. Indication is sampled *given* specimen
+# rather than independently — a CSF sample is overwhelmingly drawn for suspected
+# meningitis, a urine sample for suspected UTI, etc.
+SPECIMEN_INDICATION_WEIGHTS = {
+    "Urine": [
+        ("Suspected UTI", 0.90),
+        ("Suspected sepsis / bloodstream infection", 0.05),
+        ("Other / not specified", 0.05),
+    ],
+    "Blood": [
+        ("Suspected sepsis / bloodstream infection", 0.70),
+        ("Suspected enteric fever", 0.20),
+        ("Suspected meningitis", 0.05),
+        ("Suspected pneumonia", 0.03),
+        ("Other / not specified", 0.02),
+    ],
+    "Wound swab": [
+        ("Suspected surgical site infection", 0.45),
+        ("Suspected wound infection (non-surgical)", 0.45),
+        ("Suspected skin and soft tissue infection", 0.08),
+        ("Other / not specified", 0.02),
+    ],
+    "Sputum": [
+        ("Suspected pneumonia", 0.85),
+        ("Suspected abscess", 0.08),
+        ("Suspected sepsis / bloodstream infection", 0.05),
+        ("Other / not specified", 0.02),
+    ],
+    "Pus": [
+        ("Suspected skin and soft tissue infection", 0.40),
+        ("Suspected surgical site infection", 0.25),
+        ("Suspected wound infection (non-surgical)", 0.20),
+        ("Suspected abscess", 0.10),
+        ("Suspected sepsis / bloodstream infection", 0.03),
+        ("Other / not specified", 0.02),
+    ],
+    "CSF": [
+        ("Suspected meningitis", 0.90),
+        ("Suspected sepsis / bloodstream infection", 0.05),
+        ("Other / not specified", 0.05),
+    ],
+    "Stool": [
+        ("Suspected enteric fever", 0.65),
+        ("Suspected gastroenteritis", 0.28),
+        ("Suspected sepsis / bloodstream infection", 0.03),
+        ("Other / not specified", 0.04),
+    ],
+    "High vaginal": [
+        ("Suspected vaginal infection", 0.60),
+        ("Suspected STI / PID", 0.37),
+        ("Other / not specified", 0.03),
+    ],
+}
+
+# Organism distribution conditioned on specimen type. Weights per specimen must sum
+# to 1.0. This ensures clinically coherent pairings — Gardnerella and Candida only
+# appear in HVS, Streptococcus pneumoniae dominates CSF, E. coli dominates urine, etc.
+# Anchored to Nigerian published rates (NCDC surveillance, Iregbu et al., Olalekan et al.)
+# and general clinical microbiology. Replace with measured rates when real data arrives.
+SPECIMEN_ORGANISM_WEIGHTS = {
+    "Urine": [
+        ("Escherichia coli",         0.50),
+        ("Klebsiella pneumoniae",     0.18),
+        ("Enterococcus faecalis",     0.12),
+        ("Proteus mirabilis",         0.08),
+        ("Staphylococcus aureus",     0.05),
+        ("Pseudomonas aeruginosa",    0.04),
+        ("Enterobacter cloacae",      0.03),
+    ],
+    "Blood": [
+        ("Staphylococcus aureus",     0.28),
+        ("Klebsiella pneumoniae",     0.20),
+        ("Escherichia coli",          0.18),
+        ("Salmonella Typhi",          0.14),
+        ("Streptococcus pneumoniae",  0.08),
+        ("Pseudomonas aeruginosa",    0.06),
+        ("Acinetobacter baumannii",   0.04),
+        ("Enterobacter cloacae",      0.02),
+    ],
+    "Wound swab": [
+        ("Staphylococcus aureus",     0.38),
+        ("Escherichia coli",          0.20),
+        ("Pseudomonas aeruginosa",    0.15),
+        ("Klebsiella pneumoniae",     0.12),
+        ("Proteus mirabilis",         0.08),
+        ("Acinetobacter baumannii",   0.05),
+        ("Enterococcus faecalis",     0.02),
+    ],
+    "Sputum": [
+        ("Klebsiella pneumoniae",     0.30),
+        ("Streptococcus pneumoniae",  0.25),
+        ("Staphylococcus aureus",     0.18),
+        ("Pseudomonas aeruginosa",    0.15),
+        ("Acinetobacter baumannii",   0.08),
+        ("Escherichia coli",          0.04),
+    ],
+    "Pus": [
+        ("Staphylococcus aureus",     0.42),
+        ("Escherichia coli",          0.18),
+        ("Klebsiella pneumoniae",     0.14),
+        ("Pseudomonas aeruginosa",    0.12),
+        ("Proteus mirabilis",         0.08),
+        ("Acinetobacter baumannii",   0.06),
+    ],
+    "CSF": [
+        ("Streptococcus pneumoniae",  0.45),
+        ("Klebsiella pneumoniae",     0.22),
+        ("Escherichia coli",          0.18),
+        ("Staphylococcus aureus",     0.10),
+        ("Enterobacter cloacae",      0.05),
+    ],
+    "Stool": [
+        ("Salmonella Typhi",          0.60),
+        ("Escherichia coli",          0.25),
+        ("Klebsiella pneumoniae",     0.10),
+        ("Enterobacter cloacae",      0.05),
+    ],
+    "High vaginal": [
+        ("Gardnerella vaginalis",     0.38),
+        ("Candida species",           0.28),
+        ("Neisseria gonorrhoeae",     0.16),
+        ("Escherichia coli",          0.10),
+        ("Staphylococcus aureus",     0.05),
+        ("Enterococcus faecalis",     0.03),
+    ],
 }
 
 ENTEROBACTERALES = ["Escherichia coli", "Klebsiella pneumoniae", "Proteus mirabilis",
@@ -113,6 +263,9 @@ ORGANISM_ABBREV = {
     "Enterobacter cloacae":    "E. cloacae",
     "Proteus mirabilis":       "P. mirabilis",
     "Salmonella Typhi":        "S. Typhi",
+    "Gardnerella vaginalis":   "G. vaginalis",
+    "Neisseria gonorrhoeae":   "N. gonorrhoeae",
+    "Candida species":         "Candida spp.",
 }
 
 # ---------------------------------------------------------------------------
@@ -282,6 +435,23 @@ def _generate_ast_panel(org, context_mult, rng):
         add("Vancomycin",         "Glycopeptides",      "S")
         add("Levofloxacin",       "Fluoroquinolones",   draw(0.10))
 
+    elif org == "Neisseria gonorrhoeae":
+        add("Ceftriaxone",        "Cephalosporins",     draw(0.15))
+        add("Ciprofloxacin",      "Fluoroquinolones",   draw(0.55))
+        add("Azithromycin",       "Macrolides",         draw(0.35))
+        add("Penicillin",         "Penicillins",        draw(0.75))
+        add("Spectinomycin",      "Aminocyclitols",     draw(0.05))
+        add("Tetracycline",       "Tetracyclines",      draw(0.60))
+
+    elif org == "Gardnerella vaginalis":
+        add("Metronidazole",      "Nitroimidazoles",    draw(0.15))
+        add("Clindamycin",        "Lincosamides",       draw(0.20))
+        add("Ampicillin",          "Penicillins",       draw(0.25))
+        add("Amoxicillin-Clav",   "Beta-lactam/BLI",    draw(0.15))
+
+    # Candida species — no AST panel. Antifungal susceptibility is a separate workflow
+    # and isn't in scope for this dataset. Falls through to `return P` with an empty list.
+
     return P
 
 
@@ -310,10 +480,10 @@ def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
 
     # --- Batch sampling: do all of these in one call each rather than n_isolates × 6 calls.
     # This is what keeps 30k generation fast (~3 seconds instead of ~2+ minutes).
+    # Organism is NOT batch-sampled here — it is drawn per-isolate conditioned on the
+    # specimen type so that organism-specimen pairings are clinically coherent.
     pid_idx = rng.choice(n_patients, size=n_isolates, p=pw)
     fac_idx = rng.choice(len(fac_names), size=n_isolates, p=fw)
-    org_keys = list(ORGANISMS.keys())
-    org_idx = rng.choice(len(org_keys), size=n_isolates, p=list(ORGANISMS.values()))
     spec_keys = list(SPECIMENS.keys())
     spec_idx = rng.choice(len(spec_keys), size=n_isolates, p=list(SPECIMENS.values()))
     ward_keys = list(WARDS.keys())
@@ -330,9 +500,23 @@ def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
         pid = f"PT-NG-{pid_i + 1:06d}"
         fac = fac_names[int(fac_idx[i])]
         fmeta = FACILITIES[fac]
-        org = org_keys[int(org_idx[i])]
         spec = spec_keys[int(spec_idx[i])]
         ward = ward_keys[int(ward_idx[i])]
+
+        # Draw organism conditioned on specimen type — ensures clinically coherent pairings.
+        # Same pattern as clinical_indication draw; per-isolate cost is negligible (~3μs).
+        org_options = SPECIMEN_ORGANISM_WEIGHTS[spec]
+        org_labels = [x[0] for x in org_options]
+        org_probs = np.array([x[1] for x in org_options])
+        org = str(rng.choice(org_labels, p=org_probs))
+
+        # Draw clinical indication conditioned on specimen type — a urine sample is
+        # overwhelmingly for suspected UTI, blood for sepsis, etc. Per-isolate rng.choice
+        # on a list of 3-6 items is cheap (~3 microseconds) so the loop cost is negligible.
+        ind_options = SPECIMEN_INDICATION_WEIGHTS[spec]
+        ind_labels = [x[0] for x in ind_options]
+        ind_probs = np.array([x[1] for x in ind_options])
+        clinical_indication = str(rng.choice(ind_labels, p=ind_probs))
 
         cdate = start + timedelta(days=int(day_offsets[i]))
         rdate = cdate + timedelta(days=int(tat_days[i]))
@@ -360,6 +544,7 @@ def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
             "zone": fmeta["zone"],
             "ward_type": ward,
             "specimen_type": spec,
+            "clinical_indication": clinical_indication,
             "organism": org,
             "MRSA_status": "N/A",
             "ESBL_status": "N/A",
@@ -407,8 +592,9 @@ isolates_df, ast_df = generate_amr_dataset()
 def ast_with_meta(_ast, _iso):
     return _ast.merge(
         _iso[["isolate_id", "facility", "facility_type", "state", "zone",
-              "ward_type", "specimen_type", "collection_date", "year",
-              "quarter", "patient_age_group", "patient_sex"]],
+              "ward_type", "specimen_type", "clinical_indication",
+              "collection_date", "year", "quarter",
+              "patient_age_group", "patient_sex"]],
         on="isolate_id", how="left"
     )
 
@@ -442,6 +628,12 @@ else:
 
 fac_f = st.sidebar.multiselect("Facility", available_facilities, default=[])
 
+clin_ind_f = st.sidebar.multiselect(
+    "Clinical indication",
+    sorted(isolates_df["clinical_indication"].unique()),
+    default=[],
+)
+
 # Advanced filters — collapsed by default. Specimen and ward are power-user filters
 # that often over-constrain a first-look exploration if left visible.
 with st.sidebar.expander("Advanced filters", expanded=False):
@@ -466,6 +658,7 @@ iso_f = isolates_df
 iso_f = apply_filter(iso_f, "year", year_f)
 iso_f = apply_filter(iso_f, "zone", zone_f)
 iso_f = apply_filter(iso_f, "facility", fac_f)
+iso_f = apply_filter(iso_f, "clinical_indication", clin_ind_f)
 iso_f = apply_filter(iso_f, "specimen_type", spec_f)
 iso_f = apply_filter(iso_f, "ward_type", ward_f)
 
@@ -520,24 +713,42 @@ with tab1, tab_guard():
 
     # --- Quick filters (visible on mobile without opening the sidebar) ---
     st.caption("Quick filters — visible on all screen sizes")
-    qf_col1, qf_col2 = st.columns(2)
-    with qf_col1:
+
+    # Row 1: Year and Facility
+    qf_row1_col1, qf_row1_col2 = st.columns(2)
+    with qf_row1_col1:
         quick_year = st.selectbox(
             "Year",
-            options=["All"] + sorted(isolates_df["year"].unique().tolist(), reverse=True),
+            options=["All"] + sorted(
+                isolates_df["year"].unique().tolist(), reverse=True
+            ),
             key="quick_year",
         )
-    with qf_col2:
+    with qf_row1_col2:
         quick_facility = st.selectbox(
             "Facility",
-            options=["All facilities"] + sorted(isolates_df["facility"].unique().tolist()),
+            options=["All facilities"] + sorted(
+                isolates_df["facility"].unique().tolist()
+            ),
             key="quick_facility",
         )
-    st.divider()
-    st.caption("For specimen type, ward, and zone filters — tap the menu icon at the top left.")
 
-    # Apply quick filters on top of the sidebar filters. Both default to "All" so by
-    # default iso_overview == iso_f. When a quick filter is set, it narrows further.
+    # Row 2: Clinical indication full width
+    quick_indication = st.selectbox(
+        "Clinical indication",
+        options=["All indications"] + sorted(
+            isolates_df["clinical_indication"].unique().tolist()
+        ),
+        key="quick_indication",
+    )
+
+    st.divider()
+    st.caption(
+        "For specimen type, ward, and zone filters — tap the menu icon at the top left."
+    )
+
+    # Apply quick filters on top of the sidebar filters. All default to the "All" option
+    # so by default iso_overview == iso_f. When a quick filter is set, it narrows further.
     iso_overview = iso_f.copy()
     ast_overview = ast_f.copy()
 
@@ -549,6 +760,10 @@ with tab1, tab_guard():
         iso_overview = iso_overview[iso_overview["facility"] == quick_facility]
         ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
 
+    if quick_indication != "All indications":
+        iso_overview = iso_overview[iso_overview["clinical_indication"] == quick_indication]
+        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
+
     iso_overview["organism_display"] = iso_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
     ast_overview["organism_display"] = ast_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 
@@ -558,8 +773,8 @@ with tab1, tab_guard():
     if len(iso_overview) == 0:
         st.info(
             "The quick filter selection conflicts with the sidebar filters — no isolates "
-            "match the combination. Try changing the Year or Facility above, or clear "
-            "the sidebar filters."
+            "match the combination. Try changing the Year, Facility, or Clinical indication "
+            "above, or clear the sidebar filters."
         )
     else:
         # --- KPI cards (use iso_overview so they respond to quick filters) ---
@@ -757,6 +972,10 @@ with tab2, tab_guard():
 # ---- Tab 3: Antibiograms — the big win of long format ----
 with tab3, tab_guard():
     st.subheader("Antibiogram — resistance profile by organism")
+    st.caption(
+        "Candida species are excluded from resistance analysis — antifungal "
+        "susceptibility testing is not included in this dataset."
+    )
 
     orgs = sorted(ast_f["organism"].unique())
     if not orgs:
@@ -829,7 +1048,9 @@ with tab3, tab_guard():
 with tab4, tab_guard():
     st.subheader("Resistance trend — organism × antibiotic over time")
     st.caption("Track how resistance to a specific antibiotic has evolved for a given organism. "
-                "Useful for detecting emerging resistance and informing empirical therapy.")
+                "Useful for detecting emerging resistance and informing empirical therapy. "
+                "Candida species are excluded — antifungal susceptibility testing is not "
+                "included in this dataset.")
 
     trend_orgs = sorted(ast_f["organism"].unique())
     if not trend_orgs:
@@ -1316,3 +1537,8 @@ st.caption(
     "(MRSA ~80%, ESBL 60–80%, carbapenem-R 20–30%). Public tertiary facilities only. "
     "Do not use for clinical or policy decisions."
 )
+
+
+
+
+
