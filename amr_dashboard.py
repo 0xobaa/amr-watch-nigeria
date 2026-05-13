@@ -684,6 +684,57 @@ if len(iso_f) == 0:
     st.stop()
 
 # ---------------------------------------------------------------------------
+# Quick filters — above the tabs so they affect every tab
+# Visible on mobile without opening the sidebar hamburger menu.
+# They narrow the same iso_f / ast_f that every tab uses.
+# ---------------------------------------------------------------------------
+st.caption("Quick filters — applies to all tabs")
+
+qf_row1_col1, qf_row1_col2 = st.columns(2)
+with qf_row1_col1:
+    quick_year = st.selectbox(
+        "Year",
+        options=["All"] + sorted(isolates_df["year"].unique().tolist(), reverse=True),
+        key="quick_year",
+    )
+with qf_row1_col2:
+    quick_facility = st.selectbox(
+        "Facility",
+        options=["All facilities"] + sorted(isolates_df["facility"].unique().tolist()),
+        key="quick_facility",
+    )
+
+quick_indication = st.selectbox(
+    "Clinical indication",
+    options=["All indications"] + sorted(isolates_df["clinical_indication"].unique().tolist()),
+    key="quick_indication",
+)
+
+st.caption("For specimen type, ward, and zone filters — tap the menu icon at the top left.")
+st.divider()
+
+# Apply quick filters on top of sidebar filters
+if quick_year != "All":
+    iso_f = iso_f[iso_f["year"] == int(quick_year)]
+if quick_facility != "All facilities":
+    iso_f = iso_f[iso_f["facility"] == quick_facility]
+if quick_indication != "All indications":
+    iso_f = iso_f[iso_f["clinical_indication"] == quick_indication]
+
+# Rebuild ast_f and display columns after quick filters are applied
+ast_f = ast_full[ast_full["isolate_id"].isin(iso_f["isolate_id"])]
+iso_f["organism_display"] = iso_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
+
+if len(iso_f) == 0:
+    st.info(
+        "No isolates match the current filter combination. "
+        "Try broadening your Year, Facility, or Clinical indication selection, "
+        "or clear the sidebar filters."
+    )
+    st.stop()
+
+# ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
@@ -711,88 +762,22 @@ def tab_guard():
 # ---- Tab 1: Overview — focused "what should I worry about?" view ----
 with tab1, tab_guard():
 
-    # --- Quick filters (visible on mobile without opening the sidebar) ---
-    st.caption("Quick filters — visible on all screen sizes")
-
-    # Row 1: Year and Facility
-    qf_row1_col1, qf_row1_col2 = st.columns(2)
-    with qf_row1_col1:
-        quick_year = st.selectbox(
-            "Year",
-            options=["All"] + sorted(
-                isolates_df["year"].unique().tolist(), reverse=True
-            ),
-            key="quick_year",
-        )
-    with qf_row1_col2:
-        quick_facility = st.selectbox(
-            "Facility",
-            options=["All facilities"] + sorted(
-                isolates_df["facility"].unique().tolist()
-            ),
-            key="quick_facility",
-        )
-
-    # Row 2: Clinical indication full width
-    quick_indication = st.selectbox(
-        "Clinical indication",
-        options=["All indications"] + sorted(
-            isolates_df["clinical_indication"].unique().tolist()
-        ),
-        key="quick_indication",
-    )
-
-    st.divider()
-    st.caption(
-        "For specimen type, ward, and zone filters — tap the menu icon at the top left."
-    )
-
-    # Apply quick filters on top of the sidebar filters. All default to the "All" option
-    # so by default iso_overview == iso_f. When a quick filter is set, it narrows further.
-    iso_overview = iso_f.copy()
-    ast_overview = ast_f.copy()
-
-    if quick_year != "All":
-        iso_overview = iso_overview[iso_overview["year"] == int(quick_year)]
-        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
-
-    if quick_facility != "All facilities":
-        iso_overview = iso_overview[iso_overview["facility"] == quick_facility]
-        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
-
-    if quick_indication != "All indications":
-        iso_overview = iso_overview[iso_overview["clinical_indication"] == quick_indication]
-        ast_overview = ast_overview[ast_overview["isolate_id"].isin(iso_overview["isolate_id"])]
-
-    iso_overview["organism_display"] = iso_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
-    ast_overview["organism_display"] = ast_overview["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
-
-    # Guard: if the quick filter conflicts with the sidebar filter (e.g. sidebar has 2024
-    # but user picks 2023 in the quick filter), the intersection is empty. Show a clear
-    # message rather than a blank page.
-    if len(iso_overview) == 0:
-        st.info(
-            "The quick filter selection conflicts with the sidebar filters — no isolates "
-            "match the combination. Try changing the Year, Facility, or Clinical indication "
-            "above, or clear the sidebar filters."
-        )
-    else:
-        # --- KPI cards (use iso_overview so they respond to quick filters) ---
+        # --- KPI cards ---
         c1, c2, c3, c4, c5 = st.columns(5)
 
-        sa = iso_overview[iso_overview["organism"] == "Staphylococcus aureus"]
+        sa = iso_f[iso_f["organism"] == "Staphylococcus aureus"]
         mrsa_rate = (sa["MRSA_status"] == "MRSA").mean() * 100 if len(sa) else np.nan
 
-        entero = iso_overview[iso_overview["organism"].isin(ENTEROBACTERALES)
-                               & iso_overview["ESBL_status"].isin(["Positive", "Negative"])]
+        entero = iso_f[iso_f["organism"].isin(ENTEROBACTERALES)
+                               & iso_f["ESBL_status"].isin(["Positive", "Negative"])]
         esbl_rate = (entero["ESBL_status"] == "Positive").mean() * 100 if len(entero) else np.nan
 
-        carb_e = iso_overview[iso_overview["organism"].isin(ENTEROBACTERALES)
-                               & iso_overview["carbapenem_resistant"].isin(["Yes", "No"])]
+        carb_e = iso_f[iso_f["organism"].isin(ENTEROBACTERALES)
+                               & iso_f["carbapenem_resistant"].isin(["Yes", "No"])]
         carb_rate = (carb_e["carbapenem_resistant"] == "Yes").mean() * 100 if len(carb_e) else np.nan
 
-        c1.metric("Total isolates", f"{len(iso_overview):,}")
-        c2.metric("Unique patients", f"{iso_overview['patient_id'].nunique():,}")
+        c1.metric("Total isolates", f"{len(iso_f):,}")
+        c2.metric("Unique patients", f"{iso_f['patient_id'].nunique():,}")
         c3.metric("MRSA prevalence", f"{mrsa_rate:.1f}%" if not np.isnan(mrsa_rate) else "—")
         c4.metric("ESBL prevalence", f"{esbl_rate:.1f}%" if not np.isnan(esbl_rate) else "—")
         c5.metric("Carbapenem-R (Entero.)", f"{carb_rate:.1f}%" if not np.isnan(carb_rate) else "—")
@@ -804,7 +789,7 @@ with tab1, tab_guard():
         st.caption("Tracks the three headline resistance markers across quarters for the "
                     "current filter selection.")
 
-        t = iso_overview.copy()
+        t = iso_f.copy()
         t["period"] = t["collection_date"].dt.to_period("Q").astype(str)
 
         # Include n per period so we can hide low-volume periods where the rate would be
@@ -867,7 +852,7 @@ with tab1, tab_guard():
         # earlier 30) so that tight filter combinations still produce a useful panel; rows
         # with n < 10 are flagged as Low confidence so clinicians know to interpret cautiously.
         MIN_TESTS = 5
-        concerns = (ast_overview.groupby(["organism", "antibiotic", "antibiotic_class"])
+        concerns = (ast_f.groupby(["organism", "antibiotic", "antibiotic_class"])
                      .agg(n_tested=("interpretation", "count"),
                           n_r=("interpretation", lambda x: (x == "R").sum()))
                      .reset_index())
