@@ -34,7 +34,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 st.set_page_config(
     page_title="AMR Watch Nigeria",
     page_icon="🧫",
@@ -747,6 +746,22 @@ ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(
 # Used as the default selectbox value in Tabs 3, 4, and 5 so the first thing a
 # user sees reflects the context they filtered for, not a hardcoded organism.
 default_org = iso_f["organism"].value_counts().idxmax() if len(iso_f) > 0 else "Escherichia coli"
+
+# Force the trends and demographics organism selectors to reset when the filter
+# combination changes. Without this, Streamlit's session state remembers the last
+# manually-chosen organism and ignores the index= parameter on rerun.
+# We fingerprint the active filters; when the fingerprint changes, we delete the
+# stored widget values so the selectboxes re-read their index= default.
+_filter_fingerprint = (
+    tuple(sorted(year_f)), tuple(sorted(zone_f)), tuple(sorted(fac_f)),
+    tuple(sorted(clin_ind_f)), tuple(sorted(spec_f)), tuple(sorted(ward_f)),
+    quick_year, quick_facility, quick_indication,
+)
+if st.session_state.get("_filter_fingerprint") != _filter_fingerprint:
+    st.session_state["_filter_fingerprint"] = _filter_fingerprint
+    for key in ("trend_org", "demo_org"):
+        if key in st.session_state:
+            del st.session_state[key]
 
 if len(iso_f) == 0:
     st.info(
@@ -1544,6 +1559,9 @@ st.caption(
     "(MRSA ~80%, ESBL 60–80%, carbapenem-R 20–30%). Public tertiary facilities only. "
     "Do not use for clinical or policy decisions."
 )
+
+
+
 
 
 
