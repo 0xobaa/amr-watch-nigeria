@@ -1,91 +1,73 @@
-# AMR Watch Nigeria 
+# HealthScope
 
-A web-based antimicrobial resistance surveillance dashboard built for Nigerian health facilities. It aggregates antibiotic susceptibility testing results and surfaces resistance trends by organism, drug class, facility, and patient demographic in real time.
+A facility-level antimicrobial resistance surveillance dashboard for Nigerian health facilities. It pulls antibiotic susceptibility testing results together and shows resistance by organism, drug class, facility, and patient demographic, updated as new results come in.
 
-**Live demo:(https://amr-watch-nigeria.streamlit.app) 
-
----
+**Live demo:** https://amr-watch-nigeria.streamlit.app
 
 ## Why this exists
 
-Medical laboratory scientists generate antibiotic susceptibility testing results every day across thousands of Nigerian health facilities. Those results reach the requesting doctor and stop there. It lacks aggregation and trend tracking.
+Medical laboratory scientists produce antibiotic susceptibility results every day across thousands of Nigerian facilities. Each result reaches the requesting doctor and stops there. Nobody aggregates it. Nobody tracks the trend.
 
-When a doctor prescribes empirically before MCS results return, that decision runs on habit, convention, and whatever informal knowledge they've built up at that facility over time. If resistance to a drug has been climbing for three months, there's no system to tell them. They find out the hard way, or they don't find out at all.
+So when a doctor prescribes empirically, before the MCS result comes back, that call rests on habit, local convention, and whatever informal sense they've picked up at that facility. If resistance to a drug has been climbing for three straight months, no system tells them. They find out the hard way, or not at all.
 
-Nigeria ranks 20th globally for age-standardised AMR mortality. Drug-resistant infections were associated with 263,400 deaths in 2019. The country launched its first national AMR survey only in late 2025. At the facility level, where prescribing decisions happen every hour, nothing exists to see what's coming.
+Nigeria ranks 20th globally for age-standardised AMR mortality. Drug-resistant infections were linked to 263,400 deaths in 2019. The first national AMR survey only launched in late 2025. At the facility level, where prescriptions get written every hour, there's still nothing that shows what's coming.
 
-AMR Watch Nigeria is built to change that.
-
----
+HealthScope is built to close that gap.
 
 ## What it does
 
-The dashboard gives clinicians, pharmacists, and infection control officers a facility-level resistance picture they can act on:
+The dashboard gives clinicians, pharmacists, and infection-control officers a resistance picture they can act on:
 
-- **Antibiogram** — resistance profile for any organism, ranked by antibiotic, colour-coded by severity
-- **Resistance trends** — track how resistance to a specific organism-antibiotic pair has moved over time, by month or quarter, with optional facility comparison
+- **Antibiogram** — resistance profile for any organism, ranked by antibiotic and colour-coded by severity
+- **Resistance trends** — how resistance for an organism-antibiotic pair has moved over time, by month or quarter, with optional facility comparison
 - **Demographics** — resistance rates by age group and sex for any organism-antibiotic combination
-- **Geography** — MRSA, ESBL, and carbapenem resistance rates broken down by geopolitical zone, facility type, or individual facility
-- **Raw data export** — download isolates or AST results as CSV for offline analysis
+- **Geography** — MRSA, ESBL, and carbapenem resistance broken down by geopolitical zone, facility type, or individual facility
+- **Raw export** — download isolates or AST results as CSV for offline work
 
-All views respond to sidebar filters: year, facility type, geopolitical zone, specific facility, specimen type, and ward.
-
----
+Every view responds to the sidebar filters: year, facility type, geopolitical zone, specific facility, specimen type, and ward.
 
 ## Current status
 
-**Prototype — concept validation stage.**
+Prototype, at the concept-validation stage.
 
-The dashboard currently runs on synthetic data calibrated to NCDC AMR surveillance reports and published Nigerian clinical literature:
+The dashboard runs on synthetic data calibrated to NCDC AMR surveillance reports and published Nigerian clinical literature:
 
-- MRSA prevalence: ~80% (NCDC sentinel surveillance 2019-2021)
-- ESBL-producing Enterobacteriaceae: 60-80%
-- Carbapenem-resistant Enterobacteriaceae: 20-30%
+- MRSA prevalence around 80% (NCDC sentinel surveillance, 2019-2021)
+- ESBL-producing Enterobacteriaceae, 60-80%
+- Carbapenem-resistant Enterobacteriaceae, 20-30%
 
-12 public tertiary facilities are represented across Nigeria's six geopolitical zones. Real facility data pipeline under development.
+Twelve public tertiary facilities are represented across Nigeria's six geopolitical zones. The real facility-data pipeline is still in development.
 
 **Do not use for clinical or policy decisions.**
 
----
-
 ## Tech stack
 
-- **Data processing:** Python, Pandas, NumPy
-- **Visualisation:** Plotly
-- **Dashboard:** Streamlit
-- **Deployment:** Streamlit Cloud
+- Data processing: Python, pandas, NumPy
+- Visualisation: Plotly
+- Dashboard: Streamlit
+- Deployment: Streamlit Cloud
 
-Production stack (in development): Flask backend, Supabase database, Google Stitch frontend.
-
----
+Production stack in development: Flask backend, Supabase database, Google Stitch frontend.
 
 ## Run locally
 
 ```bash
-git clone https://github.com/0xobaa/amr-watch-nigeria
-cd amr-watch-nigeria
+git clone https://github.com/0xobaa/healthscope
+cd healthscope
 pip install -r requirements.txt
 streamlit run amr_dashboard.py
 ```
 
----
-
 ## Background
 
-This project grew out of a cross-sectional study on *S. aureus* in post-operative wound infections across two hospitals in Ilorin, Nigeria, published in the UMYU Journal of Microbiology Research in 2023 (doi: 10.47430/ujmr.2381.013). The study found a 15.2% prevalence of *S. aureus* in surgical site infections, with 40% classified as MRSA.
+This grew out of a cross-sectional study on *S. aureus* in post-operative wound infections across two hospitals in Ilorin, Nigeria, published in the UMYU Journal of Microbiology Research in 2023 (doi: 10.47430/ujmr.2381.013). The study found 15.2% prevalence of *S. aureus* in surgical site infections, 40% of it MRSA.
 
-The frustration that produced this dashboard: the data existed in the lab. It never reached the people writing the prescriptions.
-
----
+The frustration behind the whole thing: the data already existed in the lab. It just never reached the people writing the prescriptions.
 
 ## Author
 
-**Abimbola Nurudeen Oba**
-Medical Laboratory Scientist | Data Scientist
-Abuja, Nigeria
+Abimbola Nurudeen Oba — Medical Laboratory Scientist and Data Scientist, Abuja, Nigeria.
 
-hello@abimbolaoba.com · [GitHub: 0xobaa](https://github.com/0xobaa) · [@bimmzzzz](https://twitter.com/bimmzzzz)
+hello@abimbolaoba.com · GitHub [@0xobaa](https://github.com/0xobaa) · X [@bimmzzzz](https://x.com/bimmzzzz)
 
----
-
-*Prototype built as part of AMR Watch Nigeria — a health surveillance venture currently at the concept validation stage. Applications submitted to GCYLP 2026 (ITU/Huawei) and iDICE Founders Lab (Bank of Industry/AfDB).*
+Prototype built as part of HealthScope, a health-surveillance venture at the concept-validation stage. Applications submitted to GCYLP 2026 (ITU/Huawei) and iDICE Founders Lab (Bank of Industry/AfDB).
