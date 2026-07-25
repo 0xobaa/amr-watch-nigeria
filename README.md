@@ -18,11 +18,11 @@ HealthScope is built to close that gap.
 
 The dashboard gives clinicians, pharmacists, and infection-control officers a resistance picture they can act on:
 
-- **Antibiogram** — resistance profile for any organism, ranked by antibiotic and colour-coded by severity
-- **Resistance trends** — how resistance for an organism-antibiotic pair has moved over time, by month or quarter, with optional facility comparison
-- **Demographics** — resistance rates by age group and sex for any organism-antibiotic combination
-- **Geography** — MRSA, ESBL, and carbapenem resistance broken down by geopolitical zone, facility type, or individual facility
-- **Raw export** — download isolates or AST results as CSV for offline work
+- **Antibiogram**: resistance profile for any organism, ranked by antibiotic and colour-coded by severity
+- **Resistance trends**: how resistance for an organism-antibiotic pair has moved over time, by month or quarter, with optional facility comparison
+- **Demographics**: resistance rates by age group and sex for any organism-antibiotic combination
+- **Geography**: MRSA, ESBL, and carbapenem resistance broken down by geopolitical zone, facility type, or individual facility
+- **Raw export**: download isolates or AST results as CSV for offline work
 
 Every view responds to the sidebar filters: year, facility type, geopolitical zone, specific facility, specimen type, and ward.
 
@@ -66,7 +66,7 @@ The frustration behind the whole thing: the data already existed in the lab. It 
 
 ## Author
 
-Abimbola Nurudeen Oba — Medical Laboratory Scientist and Data Scientist, Abuja, Nigeria.
+Abimbola Nurudeen Oba. Medical Laboratory Scientist and Data Scientist, Abuja, Nigeria.
 
 hello@abimbolaoba.com · GitHub [@0xobaa](https://github.com/0xobaa) · Website: (https://healthscope.abimbolaoba.com/)
 

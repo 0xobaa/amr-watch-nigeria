@@ -1,5 +1,5 @@
 """
-Nigerian AMR Surveillance Dashboard — Prototype v2
+HealthScope: Nigerian AMR Surveillance Dashboard (Prototype v2)
 Synthetic dataset calibrated to NCDC AMR reports and published Nigerian literature:
   - MRSA prevalence: ~80%
   - Carbapenem resistance (Enterobacterales): 20-30%
@@ -34,12 +34,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.set_page_config(
-    page_title="AMR Watch Nigeria",
-    page_icon="🧫",
-    layout="centered"
-)
-
 st.caption(
     "For the best experience, view on a desktop or laptop browser. "
     "Mobile optimisation is coming in the next version."
@@ -79,7 +73,7 @@ ORGANISMS = {
     "Gardnerella vaginalis":     0.02,
     "Neisseria gonorrhoeae":     0.015,
     "Candida species":           0.015,
-    # CSF / meningitis — primarily relevant to CSF specimens
+    # CSF / meningitis - primarily relevant to CSF specimens
     "Neisseria meningitidis":    0.014,
 }
 
@@ -111,7 +105,7 @@ CLINICAL_INDICATIONS = [
 
 # Conditional distribution of clinical indication given specimen type. Each list of
 # (indication, weight) tuples must sum to 1.0. Indication is sampled *given* specimen
-# rather than independently — a CSF sample is overwhelmingly drawn for suspected
+# rather than independently - a CSF sample is overwhelmingly drawn for suspected
 # meningitis, a urine sample for suspected UTI, etc.
 SPECIMEN_INDICATION_WEIGHTS = {
     "Urine": [
@@ -165,7 +159,7 @@ SPECIMEN_INDICATION_WEIGHTS = {
 }
 
 # Organism distribution conditioned on specimen type. Weights per specimen must sum
-# to 1.0. This ensures clinically coherent pairings — Gardnerella and Candida only
+# to 1.0. This ensures clinically coherent pairings - Gardnerella and Candida only
 # appear in HVS, Streptococcus pneumoniae dominates CSF, E. coli dominates urine, etc.
 # Anchored to Nigerian published rates (NCDC surveillance, Iregbu et al., Olalekan et al.)
 # and general clinical microbiology. Replace with measured rates when real data arrives.
@@ -274,7 +268,7 @@ ORGANISM_ABBREV = {
 }
 
 # ---------------------------------------------------------------------------
-# Data generation — two linked tables
+# Data generation - two linked tables
 # ---------------------------------------------------------------------------
 def _age_group(age: int) -> str:
     if age < 1:  return "<1 year"
@@ -291,7 +285,7 @@ def calculate_trend(ast_df: pd.DataFrame, organism: str, antibiotic: str,
 
     Returns a direction string. Requires at least 20 tests total and at least
     min_periods quarters with n >= 10 to produce a meaningful result; otherwise
-    returns '— Insufficient data' rather than a misleading direction.
+    returns 'Insufficient data' rather than a misleading direction.
     """
     pair_df = ast_df[
         (ast_df["organism"] == organism) &
@@ -299,7 +293,7 @@ def calculate_trend(ast_df: pd.DataFrame, organism: str, antibiotic: str,
     ].copy()
 
     if len(pair_df) < 20:
-        return "— Insufficient data"
+        return "Insufficient data"
 
     pair_df["period"] = pd.to_datetime(pair_df["collection_date"]).dt.to_period("Q").astype(str)
     period_summary = (
@@ -313,7 +307,7 @@ def calculate_trend(ast_df: pd.DataFrame, organism: str, antibiotic: str,
     period_summary = period_summary[period_summary["n_tested"] >= 10].sort_values("period")
 
     if len(period_summary) < min_periods:
-        return "— Insufficient data"
+        return "Insufficient data"
 
     period_summary["pct_r"] = period_summary["n_r"] / period_summary["n_tested"] * 100
 
@@ -333,7 +327,7 @@ def calculate_trend(ast_df: pd.DataFrame, organism: str, antibiotic: str,
 def wilson_confidence_interval(n_r: int, n_tested: int, confidence: float = 0.95):
     """Wilson score interval for a proportion. Returns (lower, upper) on 0-100 scale.
 
-    Wide when n is small, narrow when n is large — communicates reliability visually
+    Wide when n is small, narrow when n is large - communicates reliability visually
     without forcing the user to interpret raw counts.
     """
     if n_tested == 0:
@@ -455,9 +449,9 @@ def _generate_ast_panel(org, context_mult, rng):
         add("Amoxicillin-Clav",   "Beta-lactam/BLI",    draw(0.15))
 
     elif org == "Neisseria meningitidis":
-        # Ceftriaxone remains the drug of choice — resistance still very low in Nigeria.
+        # Ceftriaxone remains the drug of choice - resistance still very low in Nigeria.
         # Penicillin resistance rising but still below fluoroquinolone rates.
-        # Chloramphenicol included — still used in resource-limited settings.
+        # Chloramphenicol included - still used in resource-limited settings.
         add("Ceftriaxone",        "Cephalosporins",     draw(0.05))
         add("Penicillin",         "Penicillins",        draw(0.20))
         add("Ciprofloxacin",      "Fluoroquinolones",   draw(0.15))
@@ -465,7 +459,7 @@ def _generate_ast_panel(org, context_mult, rng):
         add("Rifampicin",         "Rifamycins",         draw(0.05))
         add("Azithromycin",       "Macrolides",         draw(0.10))
 
-    # Candida species — no AST panel. Antifungal susceptibility is a separate workflow
+    # Candida species - no AST panel. Antifungal susceptibility is a separate workflow
     # and isn't in scope for this dataset. Falls through to `return P` with an empty list.
 
     return P
@@ -475,12 +469,12 @@ def _generate_ast_panel(org, context_mult, rng):
 def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
     rng = np.random.default_rng(seed)
 
-    # Patient pool — some patients contribute multiple isolates (see weight comment below)
+    # Patient pool - some patients contribute multiple isolates (see weight comment below)
     n_patients = int(n_isolates * 0.82)
 
     # Sampling weights determine how likely each patient is to be picked for a new isolate.
     # Most patients have weight 1 (single isolate); a minority get higher weights so they
-    # appear multiple times in the output — simulating repeat cultures from the same patient,
+    # appear multiple times in the output - simulating repeat cultures from the same patient,
     # which is common in hospital surveillance. The [1,1,1,2,3]/[0.7,0.1,0.05,0.1,0.05]
     # mix yields roughly 45-50% of patients contributing >1 isolate after normalisation.
     pw = rng.choice([1, 1, 1, 2, 3], size=n_patients, p=[0.7, 0.1, 0.05, 0.1, 0.05]).astype(float)
@@ -496,7 +490,7 @@ def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
 
     # --- Batch sampling: do all of these in one call each rather than n_isolates × 6 calls.
     # This is what keeps 30k generation fast (~3 seconds instead of ~2+ minutes).
-    # Organism is NOT batch-sampled here — it is drawn per-isolate conditioned on the
+    # Organism is NOT batch-sampled here - it is drawn per-isolate conditioned on the
     # specimen type so that organism-specimen pairings are clinically coherent.
     pid_idx = rng.choice(n_patients, size=n_isolates, p=pw)
     fac_idx = rng.choice(len(fac_names), size=n_isolates, p=fw)
@@ -519,14 +513,14 @@ def generate_amr_dataset(n_isolates: int = 30000, seed: int = 42):
         spec = spec_keys[int(spec_idx[i])]
         ward = ward_keys[int(ward_idx[i])]
 
-        # Draw organism conditioned on specimen type — ensures clinically coherent pairings.
+        # Draw organism conditioned on specimen type - ensures clinically coherent pairings.
         # Same pattern as clinical_indication draw; per-isolate cost is negligible (~3μs).
         org_options = SPECIMEN_ORGANISM_WEIGHTS[spec]
         org_labels = [x[0] for x in org_options]
         org_probs = np.array([x[1] for x in org_options])
         org = str(rng.choice(org_labels, p=org_probs))
 
-        # Draw clinical indication conditioned on specimen type — a urine sample is
+        # Draw clinical indication conditioned on specimen type - a urine sample is
         # overwhelmingly for suspected UTI, blood for sepsis, etc. Per-isolate rng.choice
         # on a list of 3-6 items is cheap (~3 microseconds) so the loop cost is negligible.
         ind_options = SPECIMEN_INDICATION_WEIGHTS[spec]
@@ -621,18 +615,18 @@ ast_full = ast_with_meta(ast_df, isolates_df)
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("🧫 AMR Dashboard")
-st.sidebar.caption("Nigerian Antimicrobial Resistance Surveillance — Prototype")
+st.sidebar.caption("Nigerian Antimicrobial Resistance Surveillance (Prototype)")
 
 st.sidebar.subheader("Filters")
 st.sidebar.caption("Leave a filter empty to include all values.")
 
-# Primary filters — always visible for quick exploration
+# Primary filters - always visible for quick exploration
 year_f = st.sidebar.multiselect("Year", sorted(isolates_df["year"].unique()), default=[])
 
 zone_f = st.sidebar.multiselect("Geopolitical zone",
                                  sorted(isolates_df["zone"].unique()), default=[])
 
-# Facility options cascade from the zone selection — if the user picks "South West",
+# Facility options cascade from the zone selection - if the user picks "South West",
 # only LUTH, UCH and LASUTH appear in the facility dropdown. If no zone is selected,
 # all facilities are available.
 if zone_f:
@@ -650,7 +644,7 @@ clin_ind_f = st.sidebar.multiselect(
     default=[],
 )
 
-# Advanced filters — collapsed by default. Specimen and ward are power-user filters
+# Advanced filters - collapsed by default. Specimen and ward are power-user filters
 # that often over-constrain a first-look exploration if left visible.
 with st.sidebar.expander("Advanced filters", expanded=False):
     spec_f = st.multiselect("Specimen type",
@@ -658,7 +652,7 @@ with st.sidebar.expander("Advanced filters", expanded=False):
     ward_f = st.multiselect("Ward type",
                              sorted(isolates_df["ward_type"].unique()), default=[])
 
-# Facility type filter is hidden for v1 — all 12 facilities are public tertiary, so the
+# Facility type filter is hidden for v1 - all 12 facilities are public tertiary, so the
 # filter has nothing to discriminate on. Will return when secondary / primary sites
 # are added to the dataset. The column itself is preserved for geography and KPI logic.
 
@@ -692,19 +686,19 @@ st.sidebar.caption("Synthetic data. Prototype / development use only.")
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.title("Nigerian AMR Surveillance Dashboard")
-st.markdown("Prototype dashboard — AMR patterns across Nigerian public tertiary facilities.")
+st.title("HealthScope AMR Surveillance Dashboard")
+st.markdown("Prototype dashboard showing AMR patterns across Nigerian public tertiary facilities.")
 
 if len(iso_f) == 0:
     st.warning("No isolates match the current filters.")
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Quick filters — above the tabs so they affect every tab
+# Quick filters - above the tabs so they affect every tab
 # Visible on mobile without opening the sidebar hamburger menu.
 # They narrow the same iso_f / ast_f that every tab uses.
 # ---------------------------------------------------------------------------
-st.caption("Quick filters — applies to all tabs")
+st.caption("Quick filters, applied to all tabs")
 
 qf_row1_col1, qf_row1_col2 = st.columns(2)
 with qf_row1_col1:
@@ -726,7 +720,7 @@ quick_indication = st.selectbox(
     key="quick_indication",
 )
 
-st.caption("For specimen type, ward, and zone filters — tap the menu icon at the top left.")
+st.caption("For specimen type, ward, and zone filters, tap the menu icon at the top left.")
 st.divider()
 
 # Apply quick filters on top of sidebar filters
@@ -742,7 +736,7 @@ ast_f = ast_full[ast_full["isolate_id"].isin(iso_f["isolate_id"])]
 iso_f["organism_display"] = iso_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(x, x))
 
-# Dynamic default organism — the most prevalent in the current filtered selection.
+# Dynamic default organism - the most prevalent in the current filtered selection.
 # Used as the default selectbox value in Tabs 3, 4, and 5 so the first thing a
 # user sees reflects the context they filtered for, not a hardcoded organism.
 default_org = iso_f["organism"].value_counts().idxmax() if len(iso_f) > 0 else "Escherichia coli"
@@ -782,7 +776,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 
 # Friendly empty-state handler. Wrapping each tab's content prevents one failure
 # from taking down the whole dashboard. The Details expander still shows the raw
-# error for debugging — this should never be hidden from the developer, only from
+# error for debugging - this should never be hidden from the developer, only from
 # the end user on first glance.
 @contextmanager
 def tab_guard():
@@ -791,12 +785,12 @@ def tab_guard():
     except Exception as exc:
         st.info(
             "Limited data for the current filter combination. Try broadening your "
-            "selection — for example, choose a wider date range or include more facilities."
+            "selection, for example by choosing a wider date range or including more facilities."
         )
         with st.expander("Technical details (for debugging)"):
             st.code(f"{type(exc).__name__}: {exc}")
 
-# ---- Tab 1: Overview — focused "what should I worry about?" view ----
+# ---- Tab 1: Overview - focused "what should I worry about?" view ----
 with tab1, tab_guard():
 
         # --- KPI cards ---
@@ -815,9 +809,9 @@ with tab1, tab_guard():
 
         c1.metric("Total isolates", f"{len(iso_f):,}")
         c2.metric("Unique patients", f"{iso_f['patient_id'].nunique():,}")
-        c3.metric("MRSA prevalence", f"{mrsa_rate:.1f}%" if not np.isnan(mrsa_rate) else "—")
-        c4.metric("ESBL prevalence", f"{esbl_rate:.1f}%" if not np.isnan(esbl_rate) else "—")
-        c5.metric("Carbapenem-R (Entero.)", f"{carb_rate:.1f}%" if not np.isnan(carb_rate) else "—")
+        c3.metric("MRSA prevalence", f"{mrsa_rate:.1f}%" if not np.isnan(mrsa_rate) else "n/a")
+        c4.metric("ESBL prevalence", f"{esbl_rate:.1f}%" if not np.isnan(esbl_rate) else "n/a")
+        c5.metric("Carbapenem-R (Entero.)", f"{carb_rate:.1f}%" if not np.isnan(carb_rate) else "n/a")
 
         st.markdown("---")
 
@@ -899,7 +893,7 @@ with tab1, tab_guard():
         concerns["pct_r"] = (concerns["n_r"] / concerns["n_tested"] * 100).round(1)
 
         # Exclude combinations with well-known intrinsic / near-universal resistance that
-        # aren't clinically actionable — e.g. ampicillin in Gram-negatives is essentially
+        # aren't clinically actionable - e.g. ampicillin in Gram-negatives is essentially
         # always resistant by nature, so clinicians don't use it empirically. Surfacing it
         # as a "top concern" adds noise to the signal.
         INTRINSIC_R_GRAM_NEG = ["Escherichia coli", "Klebsiella pneumoniae",
@@ -991,11 +985,11 @@ with tab2, tab_guard():
     )
     st.plotly_chart(fig, use_container_width=True)
 
-# ---- Tab 3: Antibiograms — the big win of long format ----
+# ---- Tab 3: Antibiograms - the big win of long format ----
 with tab3, tab_guard():
-    st.subheader("Antibiogram — resistance profile by organism")
+    st.subheader("Antibiogram: resistance profile by organism")
     st.caption(
-        "Candida species are excluded from resistance analysis — antifungal "
+        "Candida species are excluded from resistance analysis. Antifungal "
         "susceptibility testing is not included in this dataset."
     )
 
@@ -1018,7 +1012,7 @@ with tab3, tab_guard():
         summary["pct_r"] = (summary["n_r"] / summary["n_tested"] * 100).round(1)
         summary = summary[summary["n_tested"] >= 5].sort_values("pct_r")
 
-        # Confidence label — informs clinicians which rates to trust
+        # Confidence label - informs clinicians which rates to trust
         summary["confidence"] = summary["n_tested"].apply(
             lambda n: "Low" if n < 10 else ("Medium" if n < 30 else "High")
         )
@@ -1042,7 +1036,7 @@ with tab3, tab_guard():
                                    xaxis_range=[0, 110], coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
-                st.markdown(f"**{ORGANISM_ABBREV.get(sel, sel)}** — {oa['isolate_id'].nunique():,} isolates")
+                st.markdown(f"**{ORGANISM_ABBREV.get(sel, sel)}** ({oa['isolate_id'].nunique():,} isolates)")
                 disp = summary[["antibiotic", "antibiotic_class", "pct_r",
                                  "n_tested", "confidence"]].copy()
                 disp.columns = ["Antibiotic", "Class", "% Resistant",
@@ -1066,12 +1060,12 @@ with tab3, tab_guard():
                        xaxis_range=[0, 110], coloraxis_showscale=False)
     st.plotly_chart(fig, use_container_width=True)
 
-# ---- Tab 4: Resistance trends — the early-warning clinical view ----
+# ---- Tab 4: Resistance trends - the early-warning clinical view ----
 with tab4, tab_guard():
-    st.subheader("Resistance trend — organism × antibiotic over time")
+    st.subheader("Resistance trend: organism × antibiotic over time")
     st.caption("Track how resistance to a specific antibiotic has evolved for a given organism. "
                 "Useful for detecting emerging resistance and informing empirical therapy. "
-                "Candida species are excluded — antifungal susceptibility testing is not "
+                "Candida species are excluded. Antifungal susceptibility testing is not "
                 "included in this dataset.")
 
     trend_orgs = sorted(ast_f["organism"].unique())
@@ -1104,7 +1098,7 @@ with tab4, tab_guard():
             # Default to the 3 highest-volume facilities in the current selection, so the
             # comparison starts with statistically meaningful signal rather than the 3 sites
             # that happen to come first alphabetically. Limiting to 3 keeps the chart
-            # readable — more than that becomes spaghetti.
+            # readable - more than that becomes spaghetti.
             vol_ranked = (ast_f[ast_f["organism"] == t_org]["facility"]
                            .value_counts().index.tolist())
             try:
@@ -1113,7 +1107,7 @@ with tab4, tab_guard():
                     default=vol_ranked[:3], max_selections=3,
                 )
             except TypeError:
-                # Older Streamlit versions don't support max_selections — fall back to
+                # Older Streamlit versions don't support max_selections - fall back to
                 # a soft limit with a warning.
                 chosen_facs = st.multiselect(
                     "Facilities to compare (max 3)", vol_ranked,
@@ -1314,7 +1308,7 @@ with tab4, tab_guard():
                 total_tested = len(t_data)
                 period_label = "month" if period == "Monthly" else "quarter"
 
-                # Latest-period %R — compute differently depending on compare mode
+                # Latest-period %R - compute differently depending on compare mode
                 if compare:
                     # Pool all facilities' tests in the latest period for a true weighted rate
                     latest_period = trend_summary["period"].iloc[-1]
@@ -1334,7 +1328,7 @@ with tab4, tab_guard():
                     latest_label = f"Latest {period_label} %R"
                     latest_help = f"Resistance rate for the most recent {period_label}."
 
-                # Trend direction — compare first half vs second half of the filtered series.
+                # Trend direction - compare first half vs second half of the filtered series.
                 # Use raw pct_r (not smoothed) so real movement isn't dampened. In compare mode,
                 # aggregate across facilities per period first so we compare the pooled trend.
                 if compare:
@@ -1372,7 +1366,7 @@ with tab4, tab_guard():
 
                 with st.expander("Data table"):
                     show = trend_summary.copy()
-                    # Explicit column rename — cleaner than blanket title-casing, which
+                    # Explicit column rename - cleaner than blanket title-casing, which
                     # produced awkward labels like "N R" and "Pct R".
                     rename_map = {
                         "period": "Period",
@@ -1428,7 +1422,7 @@ with tab5, tab_guard():
             age_sum["n"] = age_sum["n"].astype(int)
             age_sum["n_r"] = age_sum["n_r"].astype(int)
             age_sum["pct_r"] = (age_sum["n_r"] / age_sum["n"] * 100).round(1)
-            # Drop age groups with fewer than 5 tests — too small to show any rate at all
+            # Drop age groups with fewer than 5 tests - too small to show any rate at all
             age_sum = age_sum[age_sum["n"] >= 5]
             age_sum["patient_age_group"] = pd.Categorical(
                 age_sum["patient_age_group"], categories=age_order, ordered=True
@@ -1452,7 +1446,7 @@ with tab5, tab_guard():
                                    coloraxis_showscale=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Sample size warning — flag any age group with low test volume
+                # Sample size warning - flag any age group with low test volume
                 small_cells = age_sum[age_sum["n"] < 10]
                 if len(small_cells) > 0:
                     st.warning(
@@ -1517,7 +1511,7 @@ with tab6, tab_guard():
 with tab7, tab_guard():
     view = st.radio("Table",
                      ["Isolates (one row per isolate)",
-                      "AST results (long format — one row per antibiotic test)"],
+                      "AST results (long format, one row per antibiotic test)"],
                      horizontal=True)
 
     if view.startswith("Isolates"):
@@ -1555,8 +1549,8 @@ with tab7, tab_guard():
 
 st.markdown("---")
 st.caption(
-    "Prototype — synthetic data calibrated to NCDC AMR surveillance and Nigerian literature "
-    "(MRSA ~80%, ESBL 60–80%, carbapenem-R 20–30%). Public tertiary facilities only. "
+    "Prototype built on synthetic data calibrated to NCDC AMR surveillance and Nigerian literature "
+    "(MRSA ~80%, ESBL 60-80%, carbapenem-R 20-30%). Public tertiary facilities only. "
     "Do not use for clinical or policy decisions."
 )
 
