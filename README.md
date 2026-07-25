@@ -2,7 +2,7 @@
 
 A facility-level antimicrobial resistance surveillance dashboard for Nigerian health facilities. It pulls antibiotic susceptibility testing results together and shows resistance by organism, drug class, facility, and patient demographic, updated as new results come in.
 
-**Live demo:** https://amr-watch-nigeria.streamlit.app
+**Live demo:** https://healthscope-amr.streamlit.app/
 
 ## Why this exists
 
@@ -68,6 +68,6 @@ The frustration behind the whole thing: the data already existed in the lab. It 
 
 Abimbola Nurudeen Oba — Medical Laboratory Scientist and Data Scientist, Abuja, Nigeria.
 
-hello@abimbolaoba.com · GitHub [@0xobaa](https://github.com/0xobaa) · X [@bimmzzzz](https://x.com/bimmzzzz)
+hello@abimbolaoba.com · GitHub [@0xobaa](https://github.com/0xobaa) · Website: (https://healthscope.abimbolaoba.com/)
 
-Prototype built as part of HealthScope, a health-surveillance venture at the concept-validation stage. Applications submitted to GCYLP 2026 (ITU/Huawei) and iDICE Founders Lab (Bank of Industry/AfDB).
+Prototype built as part of HealthScope, a hospital information system for Nigerian hospitals with built-in clinical intelligence.
