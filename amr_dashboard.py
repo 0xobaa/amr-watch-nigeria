@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Nigerian AMR Surveillance Dashboard",
+    page_title="HealthScope AMR Surveillance Dashboard",
     page_icon="🧫",
     layout="wide",
     initial_sidebar_state="expanded",
