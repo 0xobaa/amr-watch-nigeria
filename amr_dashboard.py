@@ -34,7 +34,9 @@ st.set_page_config(
     page_title="HealthScope AMR Surveillance Dashboard",
     page_icon="🧫",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" collapses the sidebar on narrow viewports. "expanded" forces it
+    # open on phones, where it covers the whole screen on load.
+    initial_sidebar_state="auto",
 )
 hs_signals.inject_mobile_css()
 

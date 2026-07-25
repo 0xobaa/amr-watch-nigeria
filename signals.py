@@ -250,7 +250,11 @@ def inject_mobile_css():
         min-width:calc(50% - 0.5rem) !important;flex:1 1 calc(50% - 0.5rem) !important;}
       [data-testid="stMetricValue"]{font-size:1.15rem !important;}
       [data-testid="stMetricLabel"]{font-size:0.72rem !important;}
-      .stTabs [data-baseweb="tab"]{padding:0 9px !important;font-size:0.82rem !important;}
+      /* Streamlit 1.60 renders tabs as [data-testid="stTab"]. The older
+         [data-baseweb="tab"] selector matches nothing. Tabs already scroll
+         horizontally; shrinking the labels just fits more on screen. */
+      [data-testid="stTab"]{padding:0 9px !important;}
+      [data-testid="stTab"] p{font-size:0.82rem !important;}
       .hs-rate{margin-left:0;}
       .hs-org{font-size:13.5px;}
     }
