@@ -25,6 +25,8 @@ from scipy import stats
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
+import signals as hs_signals
+
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
@@ -34,10 +36,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.caption(
-    "For the best experience, view on a desktop or laptop browser. "
-    "Mobile optimisation is coming in the next version."
-)
+hs_signals.inject_mobile_css()
 
 # ---------------------------------------------------------------------------
 # Reference registries
@@ -740,6 +739,11 @@ ast_f["organism_display"] = ast_f["organism"].map(lambda x: ORGANISM_ABBREV.get(
 # Used as the default selectbox value in Tabs 3, 4, and 5 so the first thing a
 # user sees reflects the context they filtered for, not a hardcoded organism.
 default_org = iso_f["organism"].value_counts().idxmax() if len(iso_f) > 0 else "Escherichia coli"
+# A signal opened from the queue takes precedence over the most-prevalent default,
+# so the Antibiogram and Trend tabs land on what the user just clicked.
+_focus = st.session_state.get("hs_focus_organism")
+if _focus is not None and _focus in set(iso_f["organism"]):
+    default_org = _focus
 
 # Force the trends and demographics organism selectors to reset when the filter
 # combination changes. Without this, Streamlit's session state remembers the last
@@ -766,11 +770,20 @@ if len(iso_f) == 0:
     st.stop()
 
 # ---------------------------------------------------------------------------
+# Signal queue. The landing answer: what crossed a review threshold, and does
+# it need a decision. The tabs below are the evidence you land on afterwards.
+# ---------------------------------------------------------------------------
+hs_signals.render(ast_f, iso_f, ENTEROBACTERALES, ORGANISM_ABBREV)
+
+st.divider()
+st.caption("Detailed views")
+
+# ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
-    ["📊 Overview", "🧬 Organisms", "💊 Antibiograms", "📈 Resistance trends",
-     "👥 Demographics", "🗺️ Geography", "📋 Raw data"]
+    ["Overview", "Organisms", "Antibiograms", "Resistance trends",
+     "Demographics", "Geography", "Raw data"]
 )
 
 
